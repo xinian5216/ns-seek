@@ -13,6 +13,8 @@ test-results/
 .private/
 notifications.json
 automation.json
+ns-seek-access.txt
+*.rotate-*
 *.sqlite
 *.sqlite-*
 *.db

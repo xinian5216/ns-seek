@@ -4,13 +4,13 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { openStore } = require('./store.cjs');
-const { hashPassword, verifyPassword } = require('./password.cjs');
+const { verifyPassword } = require('./password.cjs');
 const VERSION = require('../package.json').version;
 const random = () => crypto.randomBytes(32).toString('base64url');
 const equal = (a, b) => typeof a === 'string' && /^[A-Za-z0-9_-]{43}$/.test(a) && typeof b === 'string' && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 function createApp({ store, queryToken = random(), syncToken = random(), adminToken = random(), passwordHash = null,
-  publicOrigin = null, persist = () => {}, now = Date.now, browser = null, automation = null, notifications = null } = {}) {
+  publicOrigin = null, now = Date.now, browser = null, automation = null, notifications = null } = {}) {
   if (publicOrigin && !/^https:\/\/ns\.042804\.xyz(?::8443)?$/.test(publicOrigin)) throw new Error('Invalid public origin');
   const setupCodes = new Map();
   const pairCodes = new Map();
@@ -66,6 +66,7 @@ function createApp({ store, queryToken = random(), syncToken = random(), adminTo
       }
       const url = new URL(req.url, origin);
       if (url.origin !== origin) { reply(res, 403, { ok: false, error: 'origin_denied' }); return; }
+      if(url.pathname==='/auth/password'){reply(res,403,{ok:false,error:'ssh_rotation_only'});return;}
       const token = (req.headers.authorization || '').replace(/^Bearer /, '');
       const cookie = (req.headers.cookie || '').match(/(?:^|;\s*)ns_seek_session=([A-Za-z0-9_-]+)/)?.[1];
       const ownerValid = () => { const session = sessions.get(cookie); return !!session && session.expires > now() && (!req.headers.origin || [origin, publicOrigin].includes(req.headers.origin)); };
@@ -159,17 +160,6 @@ function createApp({ store, queryToken = random(), syncToken = random(), adminTo
         }
         reply(res,404,{ok:false,error:'route_denied'}); return;
       }
-      if (req.method === 'POST' && url.pathname === '/auth/password' && local && !url.search) {
-        const value = await body(req);
-        if (passwordHash && !verifyPassword(value.currentPassword, passwordHash)) { reply(res, 401, { ok: false, error: 'current_password_failed' }); return; }
-        const updatedHash = hashPassword(value.newPassword);
-        const updated = { queryToken: random(), syncToken: random(), adminToken: random(), passwordHash: updatedHash, publicOrigin };
-        persist(updated);
-        ({ queryToken, syncToken, adminToken, passwordHash } = updated);
-        sessions.clear(); pairCodes.clear(); setupCodes.clear(); paired = false;
-        collector = { state: 'idle', stage: 'none', receivedAt: null, page: null, recordId: null, errorCode: null };
-        reply(res, 200, { ok: true, rePairRequired: true }, { 'Set-Cookie': sessionCookie(issue(sessions, 8 * 60 * 60 * 1000)) }); return;
-      }
       if (req.method === 'POST' && url.pathname === '/auth/logout' && local) {
         sessions.delete(cookie);
         reply(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie('', 0) }); return;
@@ -256,12 +246,7 @@ if (require.main === module) {
     automation = require('./automation.cjs').createAutomation({store,browser,stateDir,resources,onEvent:notifications.event});
     if(process.env.NS_SEEK_BROWSER_MANAGED==='1')browser.sleep().catch(()=>{});
   }
-  const persist = (value) => {
-    const temporary = secretsFile + '.tmp';
-    fs.writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 });
-    fs.renameSync(temporary, secretsFile);
-  };
-  const app = createApp({ store, ...secrets, publicOrigin, persist, browser, automation, notifications });
+  const app = createApp({ store, ...secrets, publicOrigin, browser, automation, notifications });
   const maintenance = setInterval(() => store.purge(), 60 * 60 * 1000);
   maintenance.unref();
   app.server.once('close', async () => { clearInterval(maintenance); await automation?.close(); await browser?.close(); store.close(); });

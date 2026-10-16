@@ -13,6 +13,7 @@
 - Managed browsers start only for collection or explicit owner control and stop after each batch. Grant only start/stop permission on the fixed root-owned browser unit; preserve sandbox and browser-owned sessions.
 - Telegram notifications are opt-in and private-chat only through the fixed official API. Never return stored credentials or publish them. Send only fixed failure/recovery metadata, deduplicate durably, and never send forum identities, records or cookies. Delivery failure must be visible and must not restart collection.
 - Keep original MIT attribution. Do not infer the upstream author's identity.
+- Password and API-key rotation is SSH/root-only through the fixed local command. No web session, known password or API token may change credentials. Restart the service to revoke in-memory capabilities; keep replacement plaintext only in a root-private file, never arguments, logs or HTTP responses.
 - Use synthetic fixtures. Never commit cookies, tokens, HAR files, real query records, local paths or personal email addresses.
 - Keep update URLs under this repository. Bump package and userscript versions together; run npm run build.
 - Before publishing: npm run check, npm test, dependency audit, Gitleaks on tracked files and all Git refs; inspect commit identities.

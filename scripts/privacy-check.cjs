@@ -19,6 +19,8 @@ assert.match(source, /@updateURL\s+https:\/\/raw\.githubusercontent\.com\/xinian
 const server = fs.readFileSync('backend/server.cjs', 'utf8');
 assert.match(server, /listen\(18765, '127\.0\.0\.1'/);
 assert.doesNotMatch(server, /Access-Control-Allow-Origin/);
+assert.doesNotMatch(server, /hashPassword|\bnewPassword\b/);
+assert.match(server, /ssh_rotation_only/);
 assert.doesNotMatch(server, /console\.(?:log|error)\([^\n]*(?:Token|req\.|secrets|setupCode|connect-url)/);
 const browser = fs.readFileSync('backend/browser.cjs','utf8');
 assert.doesNotMatch(browser, /(?:Network|Storage)\.(?:getCookies|getAllCookies)|document\.cookie|setUserAgentOverride|setBypassCSP/);

@@ -15,7 +15,7 @@ https://ns.042804.xyz:8443 {
             disable_tlsalpn_challenge
         }
     }
-    @control path /local/open /local/stop /local/session
+    @control path /local/open /local/stop /local/session /auth/password
     respond @control 404
     reverse_proxy 127.0.0.1:18765 {
         header_up Host 127.0.0.1:18765

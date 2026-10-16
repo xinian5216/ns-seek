@@ -8,7 +8,7 @@ Fixed public origin: `https://ns.042804.xyz:8443`. Backend listens only on `127.
 
 - `GET /health`: public service identifier/version only.
 - `POST /auth/login {password}`: scrypt verification, five attempts/minute globally, eight-hour Secure HttpOnly SameSite=Strict session.
-- `POST /auth/password {currentPassword,newPassword}`: panel session; 24–128 printable ASCII with upper/lower/digit/symbol. Atomically rotates all three API keys and password hash, revokes old sessions and pairing codes; returns a replacement session. Never returns the password or API keys.
+- `/auth/password`: all HTTP methods and capabilities denied (`ssh_rotation_only`); production proxy returns 404. Rotation is a root-only local command with service restart, never an HTTP API.
 - `POST /auth/logout {}`: removes current panel session only; paired API keys remain valid.
 - `GET /local/status`: panel session; archive statistics, never credentials.
 - `POST /local/pair {}`: panel session; five-minute single-use pairing code.

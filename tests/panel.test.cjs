@@ -43,3 +43,7 @@ test('panel distinguishes browser sleep, collection failure, and configured but 
  next.notifications={enabled:true,configured:true,lastError:'network_error',lastSentAt:null};s.data(next);await s.el('refresh').onclick();
  assert.match(s.el('auto-state').textContent,/登录失效/);assert.match(s.el('auto-detail').textContent,/已休眠/);assert.match(s.el('notify-status').textContent,/连接 Telegram 失败/);assert.equal(s.el('notify-token').value,'');
 });
+
+test('panel exposes SSH recovery guidance without password rotation controls',async t=>{
+ const s=await setup(t);assert.equal(s.el('rotate'),null);assert.equal(s.el('new-password'),null);assert.match(s.w.document.body.textContent,/ns-seek-rotate/);assert.doesNotMatch(fs.readFileSync('backend/panel/panel.js','utf8'),/\/auth\/password/);
+});

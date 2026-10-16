@@ -168,28 +168,19 @@ test('panel has a restrictive CSP, HttpOnly session and does not embed credentia
   assert.match(session.headers.get('set-cookie'), /HttpOnly; SameSite=Strict/);
 });
 
-test('public password login, rotation and restart persistence revoke all old capabilities', async (t) => {
-  const { hashPassword, verifyPassword } = require('../backend/password.cjs');
+test('knowing the current password and owning any web or API capability cannot rotate credentials', async (t) => {
+  const { hashPassword } = require('../backend/password.cjs');
   const first = token() + '!Aa1'; const second = token() + '!Aa2';
-  let saved;
-  const s = await setup(t, { publicOrigin: 'https://ns.042804.xyz:8443', passwordHash: hashPassword(first), persist: (v) => { saved = v; } });
+  const s = await setup(t, { publicOrigin: 'https://ns.042804.xyz:8443', passwordHash: hashPassword(first) });
   assert.equal((await s.request('/auth/login', null, { password: 'wrong' })).status, 401);
   const login = await s.request('/auth/login', null, { password: first });
   assert.equal(login.status, 200); assert.match(login.headers.get('set-cookie'), /; Secure/);
   const cookie = login.headers.get('set-cookie').split(';')[0];
-  const pair = await s.request('/local/pair', null, {}, { Cookie: cookie });
-  assert.equal((await s.request('/auth/password', null, { currentPassword: 'wrong', newPassword: second }, { Cookie: cookie })).status, 401);
-  assert.equal((await s.request('/auth/password', null, { currentPassword: first, newPassword: 'weak' }, { Cookie: cookie })).status, 400);
-  const changed = await s.request('/auth/password', null, { currentPassword: first, newPassword: second }, { Cookie: cookie });
-  assert.equal(changed.status, 200); assert.equal(changed.value.rePairRequired, true);
-  assert.ok(verifyPassword(second, saved.passwordHash)); assert.ok(!verifyPassword(first, saved.passwordHash));
-  assert.ok(!JSON.stringify(saved).includes(second));
-  for (const role of ['query', 'sync']) assert.equal((await s.request('/v1/status', role)).status, 401);
-  assert.equal((await s.request('/local/open', 'admin', {})).status, 401);
-  assert.equal((await s.request('/local/status', null, undefined, { Cookie: cookie })).status, 401);
-  assert.equal((await s.request('/pair/claim', null, { code: pair.value.code })).status, 401);
-  assert.equal((await s.request('/auth/login', null, { password: first })).status, 401);
-  assert.equal((await s.request('/auth/login', null, { password: second })).status, 200);
+  for(const role of [null,'query','sync','admin'])assert.equal((await s.request('/auth/password',role,{currentPassword:first,newPassword:second},{Cookie:cookie})).status,403);
+  assert.equal((await s.request('/auth/password',null,undefined,{Cookie:cookie})).status,403);
+  assert.equal((await s.request('/auth/login', null, { password: first })).status, 200);
+  assert.equal((await s.request('/auth/login', null, { password: second })).status, 401);
+  assert.equal((await s.request('/local/status',null,undefined,{Cookie:cookie})).status,200);
 });
 
 test('password guesses are rate limited and foreign-origin login is denied', async (t) => {
@@ -274,13 +265,13 @@ test('dedicated browser screen and control require owner session, never query or
  assert.equal((await s.request('/owner/browser/action',null,{type:'text',text:'synthetic'},{Cookie:cookie,Origin:'https://www.nodeseek.com'})).status,401);
 });
 
-test('password rotation revokes an owner screenshot that was still in flight',async t=>{
+test('logout revokes an owner screenshot that was still in flight',async t=>{
  const {hashPassword}=require('../backend/password.cjs');const first=token()+'!Aa1';const second=token()+'!Aa2';
  let resolve;const browser={frame:()=>new Promise(r=>{resolve=r}),action:async()=>{}};
  const automation={status:()=>({enabled:false}),pause:()=>({enabled:false}),enable:()=>({enabled:true})};
  const s=await setup(t,{passwordHash:hashPassword(first),browser,automation});const cookie=await s.session();
  const frame=fetch(s.origin+'/owner/browser/frame',{headers:{Cookie:cookie}});
  for(let n=0;n<100&&!resolve;n++)await new Promise(r=>setTimeout(r,5));assert.ok(resolve);
- assert.equal((await s.request('/auth/password',null,{currentPassword:first,newPassword:second},{Cookie:cookie})).status,200);
+ assert.equal((await s.request('/auth/logout',null,{},{Cookie:cookie})).status,200);
  resolve(Buffer.from([137,80,78,71]));const response=await frame;assert.equal(response.status,401);assert.equal(response.headers.get('content-type'),'application/json; charset=utf-8');await response.json();
 });

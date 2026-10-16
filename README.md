@@ -27,9 +27,17 @@
 
 面板采用独立复杂密码；只存 scrypt 随机盐和摘要。会话 Secure、HttpOnly、SameSite=Strict，八小时到期。油猴只得到独立查询与同步密钥，没有远程浏览器权限。
 
-「更换密码并撤销旧连接」可生成复杂密码，请先保存在密码管理器。更换后旧面板会话、配对码与全部 API 密钥失效，需要重新连接油猴。远程浏览器画面与输入必须有当前有效的面板会话，查询、同步或本地管理 Bearer 令牌均不能访问；正在等待返回的截图也会重新检查会话是否已撤销。
+网页不提供改密码功能。即使知道当前密码、拿到面板会话或任一 API 令牌，也不能轮换凭据。通过 SSH 登录 VPS 后，以 root 执行：
 
-密码轮换不会删除论坛浏览器的登录状态，也不停止已经授权的后台任务。需要暂停采集可点击面板的暂停按钮，需要退出论坛请在 VPS 浏览器中正常退出。
+```sh
+ns-seek-rotate
+```
+
+命令生成复杂新密码和全部 API 密钥，停止服务、原子替换凭据再启动，撤销旧密码、会话、配对码和所有油猴密钥。用 `cat /root/ns-seek-access.txt` 在自己的 SSH 终端查看新密码，保存至密码管理器，再登录面板重新连接油猴。命令不要求输入旧面板密码，不把新密码放在命令参数或普通输出里；明文只写 root 私有文件（0600）。该文件由后续轮换覆盖，不删除时会持续保留。
+
+面板密码泄露仍意味着档案和面板控制可被访问，应立即通过 SSH 轮换。SSH 私钥是独立的恢复凭据，网页不能更改它。远程浏览器画面与输入仍要求当前有效的面板会话，API 令牌不能访问。
+
+轮换会短暂重启采集应用，保留数据库、论坛私有配置和自动任务计划。需要暂停采集可点击面板的暂停按钮，需要退出论坛请在 VPS 浏览器中正常退出。
 
 ## 数据范围与隐私
 
@@ -55,6 +63,7 @@ Node 22.23.2，内置 SQLite，零 npm 运行时依赖；官方 Debian Chromium�
 - [应用服务](deploy/ns-seek.service)、[浏览器服务](deploy/ns-seek-browser.service)、[浏览器启动](deploy/start-browser.sh)、[策略](deploy/chromium-policy.json)、[Caddy](deploy/Caddyfile)。安装 native 包后创建独立服务账户和私有目录，再仅启用应用服务，浏览器服务禁用开机自启。
 - 按需运行需 Debian `polkitd`，将 [固定服务规则](deploy/50-ns-seek-browser.rules) 以 root:root、0644 安装到 `/etc/polkit-1/rules.d/50-ns-seek-browser.rules`，设置 `NS_SEEK_BROWSER_MANAGED=1`。仅允许应用账户启停固定浏览器服务，不得授予任意命令或其他服务权限。
 - Telegram 设置在 `/var/lib/ns-seek/notifications.json`（0600），包含通知密钥和固定状态。仅所有者会话可管理，API Bearer 密钥无权访问；目标固定为官方 API，不支持任意 webhook。
+- 将 [轮换命令](deploy/ns-seek-rotate) 以 root:root、0700 安装到 `/usr/local/sbin/ns-seek-rotate`；固定调用原生 `flock` 与本项目 Node 入口，不允许网页调用。应用账户没有启停自身服务或执行 root 命令的授权。
 - 应用重启保留数据库、计划和暂停状态；面板需重新登录。浏览器会话保留在其私有配置中。运行环境以 `NS_SEEK_BROWSER=1` 启用服务器采集功能。
 - 浏览器保留 512MiB 内存硬上限和 512MiB 交换上限，不设置会导致持续回收的低软限制。VPS 增加 1GiB、0600 权限的持久交换文件作为峰值缓冲。任务发现可用物理内存低于 96MiB 会暂停。
 

@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+umask 077
+exec /usr/bin/flock --nonblock /run/ns-seek-rotate.lock /opt/ns-seek/runtime/node-v22.23.2-linux-x64/bin/node --no-warnings /opt/ns-seek/app/backend/rotate.cjs

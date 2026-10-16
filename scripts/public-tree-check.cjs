@@ -16,6 +16,7 @@ for (const file of files) {
   assert.ok(!/(?:^|\/)(?:Cookies|History|Login Data|Local State|Preferences|DevToolsActivePort|automation\.json|Singleton[^/]*)$/i.test(file), `Private browser or scheduler state is tracked: ${file}`);
   assert.ok(!/(?:^|\/)\.private(?:\/|$)|(?:^|\/)(?:secrets\.json|connect-url\.txt|\.env(?:\..*)?)$|\.(?:sqlite(?:-[^/]*)?|db(?:-[^/]*)?|pem|key|pid|har|log)$/i.test(file), `Private file is tracked: ${file}`);
   const bytes = fs.readFileSync(file);
+  assert.ok(!/(?:^|\/)ns-seek-access\.txt$|\.rotate-[0-9a-f]+$/i.test(file), `Private rotation output is tracked: ${file}`);
   assert.ok(!/(?:^|\/)notifications\.json$/i.test(file), `Private notification settings are tracked: ${file}`);
   assert.ok(privateValues.every((value) => !bytes.includes(Buffer.from(value))), `A private local credential is present in tracked file: ${file}`);
 }

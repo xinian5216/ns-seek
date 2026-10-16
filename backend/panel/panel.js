@@ -18,7 +18,7 @@
       headers: data === undefined ? {} : { 'Content-Type': 'application/json' }, body: data === undefined ? undefined : JSON.stringify(data), signal: AbortSignal.timeout(10000) });
     if (!response.ok) {
       if (response.status === 429) throw new Error('尝试次数过多，请一分钟后再试。');
-      if (response.status === 400) throw new Error('请使用 24–128 位、含大小写字母数字和符号的新密码。');
+      if (response.status === 400) throw new Error('提交内容无效，请检查后重试。');
       if (response.status === 401) throw Object.assign(new Error('密码不正确或登录已过期，请重新登录。'), { auth: true });
       throw new Error('服务暂时未能完成请求，请稍后刷新。');
     }
@@ -106,24 +106,8 @@
     } catch (e) { message.textContent = e.message; }
     finally { el('copy-pair').disabled = false; }
   };
-  el('generate').onclick = () => {
-    const bytes = crypto.getRandomValues(new Uint8Array(24));
-    el('new-password').value = btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_') + '!Aa1';
-    message.textContent = '已生成复杂密码。请先复制并保存，再点击更换。';
-  };
-  el('copy').onclick = async () => {
-    try { if (!el('new-password').value) throw new Error(); await navigator.clipboard.writeText(el('new-password').value); message.textContent = '新密码已复制，请保存在密码管理器中。'; }
-    catch { message.textContent = '未能复制，请使用密码管理器保存新密码。'; }
-  };
-  el('rotate').onsubmit = async (event) => {
-    event.preventDefault();
-    try {
-      await request('/auth/password', { currentPassword: el('current-password').value, newPassword: el('new-password').value });
-      el('rotate').reset(); message.textContent = '密码已更换，所有旧登录和油猴密钥已撤销。请点击连接油猴重新配对。';
-    } catch (e) { message.textContent = e.message; }
-  };
   el('logout').onclick = async () => {
-    try { await request('/auth/logout', {}); showLogin(); message.textContent = '已退出。已配对的油猴仍可查询，需要撤销时请更换密码。'; }
+    try { await request('/auth/logout', {}); showLogin(); message.textContent = '已退出。已配对油猴仍可查询；撤销全部连接请通过 VPS SSH 轮换。'; }
     catch (e) { message.textContent = e.message; }
   };
   try {
