@@ -10,6 +10,7 @@ Fixed public origin: `https://ns.042804.xyz:8443`. Backend listens only on `127.
 - `POST /local/pair {}`: panel session; five-minute single-use pairing code.
 - `POST /pair/claim {code}`: exchanges code for separate query/sync Bearer tokens; never admin token.
 - `GET /v1/status`: query or sync token; retained counts and progress.
+- `POST /v1/progress`: sync token, `{state,stage,page?,recordId?,errorCode?}`; strict enums and numeric counters only. In-memory status, no error text or user data. Running heartbeat older than 45 seconds is marked stale. Password rotation clears it. Panel reads `sync` in authenticated status responses every five seconds.
 - `GET /v1/sync-plan`: sync token; descending `nextId`, `latestId`, retention boundary state. `nextId=0` means current scan stopped, never proof of completeness.
 - `POST /v1/ingest`: sync token; `{kind:'page'|'id',records:[...],requestedId?,page?,lastPage?}`. Up to 20 white-listed records. Server discards ordinary/expired events and stores numeric observation checkpoints only. Empty ID is checkpointed only after successful forum response. Descending scan stops after 20 consecutive valid expired records; empty IDs reset this streak.
 - `GET /v1/user?uid=N&before=N&limit=50`: query token; keyset pagination, limit 1–100. Only ban/unban events within the last 365 days. Query does not update or log search history.

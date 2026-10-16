@@ -17,6 +17,8 @@ function createApp({ store, queryToken = random(), syncToken = random(), adminTo
   const sessions = new Map();
   const limits = new Map();
   let paired = false;
+  let collector = { state: 'idle', stage: 'none', receivedAt: null, page: null, recordId: null, errorCode: null };
+  const syncStatus = () => ({ ...collector, paired, stale: collector.state === 'running' && now() - collector.receivedAt > 45000 });
   let loginWindow = { start: 0, count: 0 };
   const sessionCookie = (code, maxAge = 28800) => `ns_seek_session=${code}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${publicOrigin ? '; Secure' : ''}`;
   function issue(map, ttl) {
@@ -69,6 +71,7 @@ function createApp({ store, queryToken = random(), syncToken = random(), adminTo
       const session = sessions.get(cookie);
       const local = !!session && session.expires > now() && (!req.headers.origin || [origin, publicOrigin].includes(req.headers.origin));
       const scope = equal(token, adminToken) ? 'admin' : equal(token, syncToken) ? 'sync' : equal(token, queryToken) ? 'query' : local ? 'local' : 'none';
+      if (['sync', 'query'].includes(scope)) paired = true;
       const minute = Math.floor(now() / 60000);
       const bucket = limits.get(scope) || { minute, count: 0 };
       if (bucket.minute !== minute) { bucket.minute = minute; bucket.count = 0; }
@@ -113,6 +116,7 @@ function createApp({ store, queryToken = random(), syncToken = random(), adminTo
         persist(updated);
         ({ queryToken, syncToken, adminToken, passwordHash } = updated);
         sessions.clear(); pairCodes.clear(); setupCodes.clear(); paired = false;
+        collector = { state: 'idle', stage: 'none', receivedAt: null, page: null, recordId: null, errorCode: null };
         reply(res, 200, { ok: true, rePairRequired: true }, { 'Set-Cookie': sessionCookie(issue(sessions, 8 * 60 * 60 * 1000)) }); return;
       }
       if (req.method === 'POST' && url.pathname === '/auth/logout' && local) {
@@ -129,14 +133,27 @@ function createApp({ store, queryToken = random(), syncToken = random(), adminTo
         setImmediate(() => server.close()); return;
       }
       if (req.method === 'GET' && url.pathname === '/local/status' && local && !url.search) {
-        reply(res, 200, { ok: true, paired, archive: store.status() }); return;
+        reply(res, 200, { ok: true, paired, sync: syncStatus(), archive: store.status() }); return;
       }
       if (req.method === 'POST' && url.pathname === '/local/pair' && local) {
         await body(req);
         reply(res, 200, { ok: true, code: issue(pairCodes, 5 * 60 * 1000) }); return;
       }
       if (req.method === 'GET' && url.pathname === '/v1/status' && ['query', 'sync'].includes(scope) && !url.search) {
-        reply(res, 200, { ok: true, archive: store.status() }); return;
+        reply(res, 200, { ok: true, sync: syncStatus(), archive: store.status() }); return;
+      }
+      if (req.method === 'POST' && url.pathname === '/v1/progress' && scope === 'sync' && !url.search) {
+        const value = await body(req);
+        if (Object.keys(value).some((k) => !['state', 'stage', 'page', 'recordId', 'errorCode'].includes(k)) ||
+            !['running', 'stopped', 'completed', 'error'].includes(value.state) ||
+            !['none', 'recent', 'verify', 'history'].includes(value.stage) ||
+            (value.page != null && (!Number.isInteger(value.page) || value.page < 1 || value.page > 100)) ||
+            (value.recordId != null && (!Number.isSafeInteger(value.recordId) || value.recordId < 1)) ||
+            (value.errorCode != null && !['login', 'challenge', 'rate_limit', 'format', 'network', 'unknown'].includes(value.errorCode))) throw new Error('invalid_record');
+        collector = { state: value.state, stage: value.stage, page: value.page ?? null, recordId: value.recordId ?? null,
+          errorCode: value.errorCode ?? null, receivedAt: now() };
+        paired = true;
+        reply(res, 200, { ok: true }); return;
       }
       if (req.method === 'GET' && url.pathname === '/v1/sync-plan' && scope === 'sync' && !url.search) {
         reply(res, 200, { ok: true, ...store.plan() }); return;

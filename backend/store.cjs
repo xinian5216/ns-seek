@@ -73,7 +73,8 @@ function openStore(file, { now = Date.now } = {}) {
   }
   function status() {
     const range = db.prepare('SELECT COUNT(*) AS count,MIN(id) AS firstId,MAX(id) AS lastId FROM records WHERE event_time>=? AND event_time<=?').get(cutoff(), now() + 300000);
-    return { ...range, ...plan(), emptyIds: db.prepare('SELECT COUNT(*) AS n FROM probes').get().n,
+    const checkedIds = db.prepare('SELECT COUNT(*) AS n FROM probes').get().n;
+    return { ...range, ...plan(), emptyIds: checkedIds, checkedIds,
       lastSync: get('lastSync') || null, recentSeeded: get('recentSeeded') === 'true', retentionDays: 365, completeHistory: false };
   }
   function ingest(body) {

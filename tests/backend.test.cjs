@@ -232,3 +232,21 @@ test('descending history stops only after 20 consecutive valid expired records, 
   assert.equal(s.plan().nextId, 0); assert.equal(s.plan().retentionBoundaryReached, true);
   assert.equal(s.status().count, 1); assert.equal(s.status().completeHistory, false);
 });
+
+test('sync progress is authenticated, numeric only, ephemeral and marked stale after lost heartbeat', async (t) => {
+  let clock = 100000;
+  const s = await setup(t, { now: () => clock });
+  const progress = { state: 'running', stage: 'recent', page: 2 };
+  assert.equal((await s.request('/v1/progress', null, progress)).status, 401);
+  assert.equal((await s.request('/v1/progress', 'query', progress)).status, 403);
+  assert.equal((await s.request('/v1/progress', 'sync', { ...progress, cookie: 'synthetic' })).status, 400);
+  assert.equal((await s.request('/v1/progress', 'sync', { ...progress, errorCode: 'arbitrary personal text' })).status, 400);
+  assert.equal((await s.request('/v1/progress', 'sync', progress)).status, 200);
+  let status = (await s.request('/v1/status', 'query')).value;
+  assert.equal(status.sync.state, 'running'); assert.equal(status.sync.stale, false);
+  clock += 45001;
+  status = (await s.request('/v1/status', 'query')).value;
+  assert.equal(status.sync.stale, true); assert.equal(status.archive.count, 0);
+  assert.equal((await s.request('/v1/progress', 'sync', {state:'completed',stage:'recent'})).status, 200);
+  assert.equal((await s.request('/v1/status','query')).value.sync.stale, false);
+});

@@ -2,38 +2,68 @@
 (async () => {
   const el = (id) => document.getElementById(id);
   const message = el('message');
+  let refreshing = false;
+  let poll;
+  let clearCode;
   const request = async (url, data) => {
     const response = await fetch(url, { method: data === undefined ? 'GET' : 'POST', credentials: 'same-origin',
-      headers: data === undefined ? {} : { 'Content-Type': 'application/json' }, body: data === undefined ? undefined : JSON.stringify(data) });
+      headers: data === undefined ? {} : { 'Content-Type': 'application/json' }, body: data === undefined ? undefined : JSON.stringify(data), signal: AbortSignal.timeout(10000) });
     if (!response.ok) {
       if (response.status === 429) throw new Error('尝试次数过多，请一分钟后再试。');
       if (response.status === 400) throw new Error('请使用 24–128 位、含大小写字母数字和符号的新密码。');
-      throw new Error('密码不正确或登录已过期，请重新登录。');
+      if (response.status === 401) throw Object.assign(new Error('密码不正确或登录已过期，请重新登录。'), { auth: true });
+      throw new Error('服务暂时未能完成请求，请稍后刷新。');
     }
     return response.json();
   };
-  const showLogin = () => { el('login').hidden = false; el('controls').hidden = true; };
-  const refresh = async () => {
+  const showLogin = () => { clearTimeout(poll); el('login').hidden = false; el('controls').hidden = true; el('pair-code').value = ''; el('pair-fallback').hidden = true; };
+  const refresh = async (manual = false) => {
+    if (refreshing) return;
+    refreshing = true; el('refresh').disabled = true; el('refresh').textContent = '正在刷新…';
+    try {
     const data = await request('/local/status');
     el('count').textContent = String(data.archive.count);
     el('last').textContent = data.archive.lastSync ? new Date(data.archive.lastSync).toLocaleString() : '尚未同步';
     el('login').hidden = true; el('controls').hidden = false;
-    message.textContent = data.archive.count ? '私人档案已就绪。查询覆盖已存档的一年内封禁记录。' : '服务已就绪，尚无记录。请连接油猴，在论坛同步一次。';
+    const sync = data.sync || { state: 'idle', paired: data.paired };
+    const states = { idle: sync.paired ? '已配对，尚未开始同步' : '等待油猴配对，尚未开始同步', running: '正在同步', stopped: '已手动停止，可在论坛继续', completed: '本次同步已完成', error: '同步遇到错误，已停止' };
+    el('sync-state').textContent = sync.stale ? '暂未收到脚本回应，不能确认仍在运行' : states[sync.state] || '等待同步';
+    const errors = { login: '论坛登录状态需要确认。', challenge: '论坛要求浏览器验证。', rate_limit: '论坛已限速，请稍后手动继续。', format: '接口数据格式不匹配。', network: '网络或服务连接异常。', unknown: '请在论坛同步弹窗查看具体错误。' };
+    const phase = sync.stage === 'recent' ? `读取最近记录${sync.page ? `：第 ${sync.page} 页` : ''}` : sync.stage === 'history' ? `补采历史${sync.recordId ? `：编号 ${sync.recordId}` : ''}` : sync.stage === 'verify' ? '验证历史读取入口' : '';
+    el('sync-detail').textContent = sync.stale ? '超过 45 秒未收到回应，标签页可能关闭、休眠或网络中断。请到论坛检查。' : sync.state === 'error' ? errors[sync.errorCode] || errors.unknown : sync.state === 'running' ? `${phase}。请保持论坛同步标签页运行。` : sync.state === 'idle' ? '连接成功后，还需在论坛弹窗点击「同步档案」。没有弹窗时，可通过油猴菜单打开。' : '进度已保存。查询范围以实际已存档记录为准。';
+    el('sync-count').textContent = `已检查 ${data.archive.checkedIds ?? data.archive.emptyIds ?? 0} 个记录编号；保留 ${data.archive.count} 条一年内封禁／解封。检查数量增加但封禁数量不变，也可能是在正常过滤其他记录。`;
+    const stamp = new Date().toLocaleTimeString();
+    el('refreshed').textContent = `状态更新于 ${stamp} · 每 5 秒自动刷新`;
+    if (manual) message.textContent = `档案状态已刷新（${stamp}）。`;
+    } finally { refreshing = false; el('refresh').disabled = false; el('refresh').textContent = '刷新档案状态'; }
   };
+  const refreshError = (error) => { if (error.auth) showLogin(); else el('sync-state').textContent = '状态刷新失败，不能确认同步进度'; message.textContent = error.auth ? error.message : '无法刷新状态，请检查网络后重试。'; };
+  const schedule = () => { clearTimeout(poll); if (el('controls').hidden) return; poll = setTimeout(async () => { if (!document.hidden) { try { await refresh(); } catch (e) { refreshError(e); } } schedule(); }, 5000); };
   el('login').onsubmit = async (event) => {
     event.preventDefault();
-    try { await request('/auth/login', { password: el('password').value }); el('password').value = ''; await refresh(); }
+    try { await request('/auth/login', { password: el('password').value }); el('password').value = ''; await refresh(); schedule(); message.textContent = '登录成功。请按下方同步状态操作。'; }
     catch (e) { message.textContent = e.message; }
   };
-  el('refresh').onclick = () => refresh().catch((e) => { showLogin(); message.textContent = e.message; });
+  el('refresh').onclick = () => refresh(true).catch(refreshError);
   el('pair').onclick = async () => {
-    const target = window.open('about:blank', '_blank');
-    if (target) target.opener = null;
+    el('pair').disabled = true; message.textContent = '正在生成连接码，随后将在当前标签页前往论坛…';
     try {
       const data = await request('/local/pair', {});
       const url = `https://www.nodeseek.com/ruling#ns-seek-pair=${encodeURIComponent(data.code)}`;
-      if (target) target.location = url; else location.assign(url);
-    } catch (error) { target?.close(); message.textContent = error.message; }
+      location.assign(url);
+    } catch (error) { message.textContent = error.message; }
+    finally { el('pair').disabled = false; }
+  };
+  el('copy-pair').onclick = async () => {
+    el('copy-pair').disabled = true;
+    try {
+      const data = await request('/local/pair', {});
+      clearTimeout(clearCode); el('pair-code').value = data.code;
+      clearCode = setTimeout(() => { el('pair-code').value = ''; el('pair-fallback').hidden = true; }, 300000);
+      try { await navigator.clipboard.writeText(data.code); message.textContent = '一次性连接码已复制。请前往论坛，通过油猴菜单打开「私人档案同步」，粘贴并配对。'; }
+      catch { el('pair-fallback').hidden = false; el('pair-code').select(); message.textContent = '浏览器未允许自动复制，请复制下方一次性码，粘贴到论坛的脚本同步弹窗。'; }
+    } catch (e) { message.textContent = e.message; }
+    finally { el('copy-pair').disabled = false; }
   };
   el('generate').onclick = () => {
     const bytes = crypto.getRandomValues(new Uint8Array(24));
@@ -59,6 +89,6 @@
     const code = new URLSearchParams(location.hash.slice(1)).get('setup');
     history.replaceState(null, '', '/');
     if (code) await request('/local/session', { code });
-    await refresh();
+    await refresh(); schedule(); message.textContent = '服务已连接。连接油猴本身不会开始采集，请查看下方同步状态。';
   } catch { showLogin(); message.textContent = '请输入专属访问密码。'; }
 })();

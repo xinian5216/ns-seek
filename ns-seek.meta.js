@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NS 管理记录快捷查看 · 独立维护版
 // @namespace    https://github.com/xinian5216/ns-seek
-// @version      1.2.0
+// @version      1.2.1
 // @description  登录浏览器同步记录到私人 SQLite，点击用户直接查私人档案，无第三方查询服务。
 // @match        https://www.nodeseek.com/post-*
 // @match        https://www.nodeseek.com/ruling*
@@ -16,6 +16,6 @@
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
 // @connect      ns.042804.xyz
-// @run-at       document-idle
+// @run-at       document-start
 // @noframes
 // ==/UserScript==

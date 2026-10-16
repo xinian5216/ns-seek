@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NS 管理记录快捷查看 · 独立维护版
 // @namespace    https://github.com/xinian5216/ns-seek
-// @version      1.2.0
+// @version      1.2.1
 // @description  登录浏览器同步记录到私人 SQLite，点击用户直接查私人档案，无第三方查询服务。
 // @match        https://www.nodeseek.com/post-*
 // @match        https://www.nodeseek.com/ruling*
@@ -16,7 +16,7 @@
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
 // @connect      ns.042804.xyz
-// @run-at       document-idle
+// @run-at       document-start
 // @noframes
 // ==/UserScript==
 
@@ -26,6 +26,13 @@
   'use strict';
 
   if (location.origin !== 'https://www.nodeseek.com') return;
+  // Capture before the forum replaces its hash with the pagination route.
+  const initialPairCode = new URLSearchParams(location.hash.slice(1)).get('ns-seek-pair');
+  if (initialPairCode) history.replaceState(null, '', `${location.pathname}${location.search}`);
+  let booted = false;
+  function boot() {
+  if (booted) return;
+  booted = true;
   const FLOOR = '.post-list-content, .post, .post-item, article, .topic-content';
   const TIMEOUT = 15000;
   const PAGE_SIZE = 20;
@@ -40,6 +47,8 @@
   let cooldownUntil = 0;
   let nextRequestAt = 0;
   let scheduled = false;
+  let stopReporter = null;
+  let reportQueue = Promise.resolve();
 
   function el(tag, text, className) {
     const node = document.createElement(tag);
@@ -56,6 +65,7 @@
   }
 
   function cancel() {
+    if (stopReporter) { stopReporter('stopped'); stopReporter = null; }
     generation += 1;
     if (active) {
       nextRequestAt = Date.now() + PAGE_DELAY;
@@ -134,7 +144,7 @@
     return value && ['queryToken', 'syncToken'].every((key) => /^[A-Za-z0-9_-]{43}$/.test(value[key])) ? value : null;
   }
 
-  function openLocal() { window.open(`${LOCAL}/`, '_blank', 'noopener,noreferrer'); }
+  function openLocal() { location.assign(`${LOCAL}/`); }
 
   function validArchive(value) {
     if (!value || !['count', 'nextId', 'latestId'].every((k) => Number.isSafeInteger(value[k]) && value[k] >= 0) ||
@@ -143,7 +153,7 @@
   }
 
   function backendRequest(route, method = 'GET', data, signal) {
-    if (!/^(?:\/pair\/claim|\/v1\/(?:status|sync-plan|ingest)|\/v1\/user\?uid=\d+(?:&before=\d+)?)$/.test(route)) return Promise.reject(new Error('私人请求路径被拒绝。'));
+    if (!/^(?:\/pair\/claim|\/v1\/(?:status|sync-plan|ingest|progress)|\/v1\/user\?uid=\d+(?:&before=\d+)?)$/.test(route)) return Promise.reject(new Error('私人请求路径被拒绝。'));
     const keys = credentials();
     if (route !== '/pair/claim' && !keys) return Promise.reject(new Error('尚未连接私人服务，请通过私人面板连接油猴。'));
     const token = /\/v1\/(?:ingest|sync-plan)$/.test(route) ? keys?.syncToken : keys?.queryToken;
@@ -356,6 +366,15 @@
       content.append(el('p', `历史补采进度：下一个待检查编号 ${state.archive.nextId}，当前已知最新编号 ${state.archive.latestId}。档案不保证完整。`));
     }
     if (state.status) content.append(el('p', state.status, 'notice'));
+    if (state.mode === 'sync' && !credentials()) {
+      content.append(el('p', '尚未配对，暂时不能同步。请在私人面板点击「连接油猴」。如果自动连接失败，复制面板的一次性连接码并粘贴到下面。'));
+      content.append(button('打开私人面板', () => openLocal()));
+      const code = el('input'); code.type = 'password'; code.autocomplete = 'off'; code.maxLength = 100;
+      code.placeholder = '粘贴一次性连接码（不是访问密码）'; code.setAttribute('aria-label', '一次性连接码');
+      code.style.cssText = 'display:block;width:100%;box-sizing:border-box;margin:10px 0;padding:8px';
+      const connect = button('使用连接码配对', () => { const value = code.value.trim(); code.value = ''; connectWithCode(value); });
+      connect.dataset.action = 'pair'; content.append(code, connect); return;
+    }
     if (state.mode === 'user') {
       if (state.archive) content.append(el('p', state.total ? `此 UID 已归档 ${state.total} 条，当前载入 ${state.rows.length} 条。` : '私人档案未找到该账号的记录，不代表该账号从未受到管理处理。'));
       const list = el('div');
@@ -434,7 +453,7 @@
       if (current !== state) return;
       state.archive = validArchive(result.archive);
       state.status = '一年内封禁记录会同步到私人数据库；论坛 Cookie 留在浏览器内。点击下方按钮后才开始读取论坛。';
-    } catch (error) { if (current === state) state.status = error.message; }
+    } catch (error) { if (current === state) { state.status = error.message; if (/连接已过期/.test(error.message)) GM_deleteValue(STORAGE_KEY); } }
     if (current === state) render();
   }
 
@@ -458,11 +477,18 @@
 
   async function runSync(mode) {
     if (current?.mode !== 'sync' || !['all', 'recent', 'history'].includes(mode)) return;
+    if (!credentials()) { current.status = '尚未配对，请先连接私人面板。'; render(); return; }
     cancel();
     const state = current;
     const ticket = generation;
     const controller = new AbortController();
     active = controller; state.busy = true;
+    let live = { state: 'running', stage: mode === 'history' ? 'verify' : 'recent' };
+    let heartbeat;
+    const report = (value) => { reportQueue = reportQueue.then(() => backendRequest('/v1/progress', 'POST', value)).catch(() => {}); };
+    const beat = () => { report({ ...live }); heartbeat = setTimeout(beat, 10000); };
+    beat();
+    stopReporter = (ending, errorCode = null) => { clearTimeout(heartbeat); report({ ...live, state: ending, errorCode }); };
     const progress = (text) => {
       if (ticket !== generation || current !== state || controller.signal.aborted) throw new Error('操作已取消。');
       state.status = text; render();
@@ -478,6 +504,7 @@
         let lastPage = MAX_PAGES;
         const stopOnOverlap = state.archive?.recentSeeded === true;
         for (let page = 1; page <= lastPage; page += 1) {
+          live = { state: 'running', stage: 'recent', page };
           progress(`正在同步最近记录：第 ${page} 页…`);
           const data = await forumRequest('page', page, controller.signal);
           if (ticket !== generation) return;
@@ -490,11 +517,13 @@
         let plan = await backendRequest('/v1/sync-plan', 'GET', undefined, controller.signal);
         if (!plan.latestId) throw new Error('请先同步最近记录，取得当前记录范围。');
         const upper = plan.latestId;
+        live = { state: 'running', stage: 'verify', recordId: upper };
         progress('正在验证按记录编号读取接口…');
         const probe = await forumRequest('id', upper, controller.signal);
         if (probe.data.length !== 1 || Number(probe.data[0].id) !== upper) throw new Error('按编号读取接口未通过验证，已保留最近记录，未开始历史补采。');
         await save('id', probe.data, upper);
         while (plan.nextId > 0) {
+          live = { state: 'running', stage: 'history', recordId: plan.nextId };
           if (!Number.isSafeInteger(plan.nextId) || plan.nextId < 1) throw new Error('私人续传进度异常。');
           progress(`正在补采历史编号 ${plan.nextId} / ${upper}…可停止后续传。`);
           const data = await forumRequest('id', plan.nextId, controller.signal);
@@ -505,8 +534,13 @@
         }
       }
       progress('本次同步已完成。仅代表当前可读取、已同步的范围，不保证完整历史。');
+      stopReporter?.('completed'); stopReporter = null;
     } catch (error) {
-      if (ticket === generation && current === state) state.status = error.message;
+      if (ticket === generation && current === state) {
+        state.status = error.message;
+        const code = /限速/.test(error.message) ? 'rate_limit' : /401|登录/.test(error.message) ? 'login' : /403|验证/.test(error.message) ? 'challenge' : /格式|编号|UID/.test(error.message) ? 'format' : /网络|超时|连接/.test(error.message) ? 'network' : 'unknown';
+        stopReporter?.('error', code); stopReporter = null;
+      }
     } finally {
       if (ticket === generation && current === state) { active = null; state.busy = false; render(); }
     }
@@ -549,9 +583,8 @@
   GM_registerMenuCommand('私人档案同步', () => showSync());
   GM_registerMenuCommand('打开私人面板', () => openLocal());
   GM_registerMenuCommand('断开私人连接', () => { cancel(); GM_deleteValue(STORAGE_KEY); if (modal?.dialog.open) modal.dialog.close(); });
-  const pairCode = new URLSearchParams(location.hash.slice(1)).get('ns-seek-pair');
-  if (pairCode) {
-    history.replaceState(null, '', `${location.pathname}${location.search}`);
+  function connectWithCode(pairCode) {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(pairCode)) { if (current) { current.status = '连接码格式不正确，请从私人面板重新复制。'; render(); } return; }
     const ui = createModal();
     ui.title.textContent = '连接私人档案';
     ui.content.replaceChildren(el('p', '正在验证私人的一次性连接码…'));
@@ -560,8 +593,10 @@
       if (!['queryToken', 'syncToken'].every((key) => /^[A-Za-z0-9_-]{43}$/.test(result[key]))) throw new Error('私人连接数据格式不匹配。');
       GM_setValue(STORAGE_KEY, { queryToken: result.queryToken, syncToken: result.syncToken });
       return showSync();
-    }).catch(() => { ui.content.replaceChildren(el('p', '连接码无效或已过期，请从私人面板重新连接。')); });
-  } else if (location.pathname === '/ruling' && credentials()) showSync();
+    }).catch(async (error) => { await showSync(); if (current) { current.status = error.message; render(); } });
+  }
+  if (initialPairCode) connectWithCode(initialPairCode);
+  else if (location.pathname === '/ruling') showSync();
 
   injectButtons();
   new MutationObserver((mutations) => {
@@ -572,4 +607,7 @@
       injectButtons();
     });
   }).observe(document.body, { childList: true, subtree: true });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
+  else boot();
 })();

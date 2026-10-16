@@ -12,7 +12,7 @@ const raw = (id = 1, extra = {}) => ({ id, target_member_id: 123, target_member_
 const archive = (extra = {}) => ({ count: 1, nextId: 1, latestId: 5, lastSync: null, completeHistory: false, ...extra });
 const queryResult = (records = [raw()], extra = {}) => ({ ok: true, records, total: records.length, nextBeforeId: null, archive: archive(), ...extra });
 
-function setup(t, { html = floor(), paired = true, url = 'https://www.nodeseek.com/post-999999-1', ignoreAbort = false } = {}) {
+function setup(t, { html = floor(), paired = true, url = 'https://www.nodeseek.com/post-999999-1', ignoreAbort = false, beforeReady } = {}) {
   const dom = new JSDOM(html, { url, runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close());
   const w = dom.window;
@@ -32,7 +32,9 @@ function setup(t, { html = floor(), paired = true, url = 'https://www.nodeseek.c
   w.GM_deleteValue = (key) => storage.delete(key);
   w.GM_registerMenuCommand = (name, cb) => menus.set(name, cb);
   const requests = [];
+  const reports = [];
   w.GM_xmlhttpRequest = (details) => {
+    if (details.url.endsWith('/v1/progress')) { reports.push(JSON.parse(details.data)); queueMicrotask(() => details.onload({status:200,finalUrl:details.url,responseText:'{"ok":true}'})); return {abort(){}}; }
     const req = { details, aborted: false, respond(data, status = 200, extras = {}) {
       details.onload({ status, finalUrl: details.url, responseText: JSON.stringify(data), ...extras });
     } };
@@ -52,8 +54,10 @@ function setup(t, { html = floor(), paired = true, url = 'https://www.nodeseek.c
     forum.push(req);
   });
   w.eval(source);
+  beforeReady?.(w);
+  w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
   const root = () => w.document.querySelector('#ns-seek-host')?.shadowRoot;
-  return { w, keys, storage, menus, requests, forum, root,
+  return { w, keys, storage, menus, requests, reports, forum, root,
     open: (index = 0) => w.document.querySelectorAll('[data-ns-seek-button]')[index].click(),
     click: (action) => root().querySelector(`[data-action="${action}"]`).click(),
     text: () => root().textContent,
@@ -82,8 +86,10 @@ test('unpaired user sees setup guidance without sending requests or exposing cre
 });
 
 test('pair code is removed from URL; long-term keys stay in GM storage and are not rendered', async (t) => {
-  const s = setup(t, { paired: false, url: 'https://www.nodeseek.com/ruling#ns-seek-pair=synthetic-code' });
-  assert.equal(s.w.location.hash, '');
+  const code = crypto.randomBytes(32).toString('base64url');
+  const s = setup(t, { paired: false, url: 'https://www.nodeseek.com/ruling#ns-seek-pair=' + code, beforeReady(w) { w.history.replaceState(null, '', '/ruling#/p-1'); } });
+  assert.equal(s.w.location.hash, '#/p-1');
+  assert.equal(JSON.parse(s.requests[0].details.data).code, code);
   assert.equal(s.requests[0].details.url, 'https://ns.042804.xyz:8443/pair/claim');
   assert.equal(s.requests[0].details.headers.Authorization, undefined);
   s.requests[0].respond({ ok: true, ...s.keys }); await tick();
@@ -252,4 +258,34 @@ test('ordinary moderation events send no names, UID or operation details to the 
   s.forum[0].respond({ success: true, total: 1, data: [row] }); await tick();
   const sent = JSON.parse(s.requests.at(-1).details.data).records[0];
   assert.deepEqual(sent, { id: 5, created_at: row.created_at, request: '{}' });
+});
+
+test('unpaired sync cannot collect; one-time code fallback pairs without a popup', async (t) => {
+  const s = setup(t, { paired: false, url: 'https://www.nodeseek.com/ruling#/p-1' });
+  await tick();
+  assert.match(s.text(), /尚未配对/);
+  assert.equal(s.root().querySelector('[data-action="all"]'), null);
+  assert.equal(s.forum.length, 0);
+  const code = crypto.randomBytes(32).toString('base64url');
+  s.root().querySelector('input').value = code;
+  s.click('pair');
+  assert.equal(JSON.parse(s.requests[0].details.data).code, code);
+  s.requests[0].respond({ ok: true, ...s.keys }); await tick();
+  s.requests[1].respond({ ok: true, archive: archive() }); await tick();
+  assert.ok(s.root().querySelector('[data-action="all"]'));
+  assert.equal(s.forum.length, 0);
+  assert.ok(!s.text().includes(code));
+});
+
+test('sync reports activity, errors and cancellation without sending forum data in progress', async (t) => {
+  const s = setup(t); await s.sync(); s.click('recent'); await tick();
+  assert.equal(s.reports[0].state, 'running');
+  await s.advance(10000);
+  assert.ok(s.reports.length >= 2);
+  s.forum[0].respond({}, 429, { headers: new Headers({'Retry-After':'60'}) }); await tick(); await tick();
+  assert.equal(s.reports.at(-1).state, 'error');
+  assert.equal(s.reports.at(-1).errorCode, 'rate_limit');
+  assert.ok(s.reports.every(r => Object.keys(r).every(k=>['state','stage','page','recordId','errorCode'].includes(k))));
+  await s.advance(60000); s.click('recent'); await tick(); s.click('stop'); await tick(); await tick();
+  assert.equal(s.reports.at(-1).state, 'stopped');
 });

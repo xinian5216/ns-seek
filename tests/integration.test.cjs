@@ -30,7 +30,7 @@ test('browser collector -> real loopback HTTP -> SQLite -> user lookup completes
     assert.equal(details.anonymous, true);
     assert.equal(details.headers.Cookie, undefined);
     const controller = new AbortController();
-    if (details.data) uploads.push(JSON.parse(details.data));
+    if (details.data && new URL(details.url).pathname === '/v1/ingest') uploads.push(JSON.parse(details.data));
     fetch(origin + new URL(details.url).pathname + new URL(details.url).search, {
       method: details.method, headers: details.headers, body: details.data, signal: controller.signal,
     }).then(async (response) => details.onload({ status: response.status, finalUrl: details.url, responseText: await response.text() }))
@@ -48,6 +48,7 @@ test('browser collector -> real loopback HTTP -> SQLite -> user lookup completes
         request: '{"suspend":{"status":true,"value":7},"coin":{"coin_diff":-1,"reason":"集成测试合成原因"}}', extra_private_field: 'must not be archived' }] }) };
   };
   w.eval(fs.readFileSync('ns-seek.user.js', 'utf8'));
+  w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
   const waitFor = async (condition) => {
     for (let i = 0; i < 100; i++) { if (condition()) return; await new Promise((resolve) => setTimeout(resolve, 10)); }
     assert.fail('Integration step did not complete');
