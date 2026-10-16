@@ -1,16 +1,15 @@
 // ==UserScript==
 // @name         NS 管理记录快捷查看 · 独立维护版
 // @namespace    https://github.com/xinian5216/ns-seek
-// @version      1.0.0
-// @description  在 NodeSeek 楼层内按需查询公开管理记录，查询前提示第三方数据传输。
+// @version      1.1.0
+// @description  使用论坛当前登录状态读取站内管理记录，在本地按 UID 筛选，无第三方查询服务。
 // @match        https://www.nodeseek.com/post-*
 // @license      MIT
 // @homepageURL  https://github.com/xinian5216/ns-seek
 // @supportURL   https://github.com/xinian5216/ns-seek/issues
 // @updateURL    https://raw.githubusercontent.com/xinian5216/ns-seek/main/ns-seek.meta.js
 // @downloadURL  https://raw.githubusercontent.com/xinian5216/ns-seek/main/ns-seek.user.js
-// @grant        GM_xmlhttpRequest
-// @connect      api.xxboxx.de
+// @grant        none
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
@@ -20,15 +19,19 @@
 (function () {
   'use strict';
 
-  const API = 'https://api.xxboxx.de';
+  if (location.origin !== 'https://www.nodeseek.com') return;
   const FLOOR = '.post-list-content, .post, .post-item, article, .topic-content';
   const TIMEOUT = 15000;
-  const MAX_ROWS = 5000;
+  const PAGE_SIZE = 20;
+  const MAX_PAGES = 100;
+  const BATCH_PAGES = 5;
+  const PAGE_DELAY = 1200;
   let modal;
   let current;
   let active;
   let generation = 0;
   let cooldownUntil = 0;
+  let nextRequestAt = 0;
   let scheduled = false;
 
   function el(tag, text, className) {
@@ -47,7 +50,10 @@
 
   function cancel() {
     generation += 1;
-    if (active) active.abort();
+    if (active) {
+      nextRequestAt = Date.now() + PAGE_DELAY;
+      active.abort();
+    }
     active = null;
   }
 
@@ -83,7 +89,7 @@
     header.append(title, close);
     const content = el('div');
     content.setAttribute('aria-live', 'polite');
-    const source = el('p', '来源：api.xxboxx.de 的第三方公开记录索引。收录可能延迟或不完整，以论坛原记录为准。', 'notice');
+    const source = el('p', '来源：NodeSeek 站内管理记录，使用你当前的论坛登录状态。仅检查已读取的页，不保证覆盖全部历史。', 'notice');
     dialog.append(header, source, content);
     root.append(style, dialog);
     document.body.append(host);
@@ -107,91 +113,134 @@
   function showPrompt(user, trigger) {
     cancel();
     const ui = createModal();
-    current = { ...user, trigger };
+    current = { ...user, trigger, rows: [], seen: new Set(), nextPage: 1, pages: 0,
+      total: null, lastPage: MAX_PAGES, ended: false, changed: false, skipped: 0,
+      visible: 30, busy: false, status: '' };
     ui.title.textContent = `${user.name} 的管理记录`;
-    const note = el('p', `继续将向 ${API} 发送此账号的 UID（${user.uid}）。服务方可获知你的访问 IP 和查询目标。本脚本不读取论坛 Cookie，不保存查询历史。`);
-    const query = button('同意并查询', () => runQuery());
+    const note = el('p', `将读取论坛管理记录并在本地筛选 UID ${user.uid}，不会向第三方查询。浏览器自动携带论坛登录状态，无需填写 Cookie。每轮最多读取 5 页，页间至少等待 1.2 秒；更早记录需手动继续，最多 100 页。`);
+    const query = button('查询最近 5 页', () => runQuery());
     query.dataset.action = 'query';
     ui.content.replaceChildren(note, query);
     if (!ui.dialog.open) ui.dialog.showModal();
     query.focus();
   }
 
-  function request(uid) {
-    let handle;
-    let timer;
-    let rejectRequest;
-    let settled = false;
-    const promise = new Promise((resolve, reject) => {
-      rejectRequest = reject;
-      const finish = (error, value) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        if (error) reject(error);
-        else resolve(value);
-      };
-      // An explicit timer also covers managers where anonymous/fetch mode ignores timeout.
-      timer = setTimeout(() => {
-        finish(new Error('请求超时，请稍后手动重试。'));
-        handle?.abort();
-      }, TIMEOUT);
-      try {
-        handle = GM_xmlhttpRequest({
-          method: 'GET',
-          url: `${API}/v1/user?q=${encodeURIComponent(`uid:${uid}`)}`,
-          anonymous: true,
-          redirect: 'error',
-          headers: { Accept: 'application/json', Referer: '' },
-          onload: (response) => {
-            if (response.finalUrl && new URL(response.finalUrl).origin !== API) {
-              finish(new Error('接口跳转到未授权地址，已拒绝结果。'));
-              return;
-            }
-            if (response.responseText.length > 4 * 1024 * 1024) {
-              finish(new Error('接口返回过大，已停止处理。'));
-              return;
-            }
-            let data;
-            try { data = JSON.parse(response.responseText); } catch {
-              finish(new Error(`接口返回非 JSON 数据（HTTP ${response.status}）。`));
-              return;
-            }
-            if (response.status === 429 || data?.error === 'rate_limited') {
-              const header = (response.responseHeaders || '').match(/^retry-after:\s*(\d+)\s*$/im);
-              const seconds = Math.max(1, Math.min(86400, Number(data?.retry_after || header?.[1]) || 60));
-              cooldownUntil = Date.now() + seconds * 1000;
-              finish(new Error(`查询过快，请约 ${seconds} 秒后手动重试。`));
-              return;
-            }
-            if (response.status < 200 || response.status >= 300 || data?.ok !== true) {
-              finish(new Error(`查询失败（HTTP ${response.status}），请稍后重试。`));
-              return;
-            }
-            if (typeof data.found !== 'boolean' ||
-                (data.found && (!Array.isArray(data.records) || data.records.some((r) => !r || typeof r !== 'object' || Array.isArray(r))))) {
-              finish(new Error('接口数据格式已变化，请检查脚本更新。'));
-              return;
-            }
-            finish(null, data);
-          },
-          onerror: () => finish(new Error('网络请求失败，请检查连接和脚本的跨域权限。')),
-          ontimeout: () => finish(new Error('请求超时，请稍后手动重试。')),
-          onabort: () => finish(new Error('请求已取消。')),
-        });
-      } catch {
-        finish(new Error('无法发起请求，请使用支持 GM_xmlhttpRequest 的油猴管理器。'));
-      }
+  function wait(signal, delay) {
+    return new Promise((resolve, reject) => {
+      const abort = () => { clearTimeout(timer); reject(new Error('请求已取消。')); };
+      const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, delay);
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
     });
+  }
+
+  async function request(page, signal) {
+    if (!Number.isInteger(page) || page < 1 || page > MAX_PAGES) throw new Error('页码超出查询范围。');
+    const controller = new AbortController();
+    let timedOut = false;
+    const abort = () => controller.abort();
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) controller.abort();
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, TIMEOUT);
+    try {
+      nextRequestAt = Date.now() + PAGE_DELAY;
+      const response = await fetch(`/api/admin/ruling/page-${page}`, {
+        method: 'GET', credentials: 'same-origin', mode: 'same-origin',
+        referrerPolicy: 'no-referrer', redirect: 'error', cache: 'no-store',
+        headers: { Accept: 'application/json' }, signal: controller.signal,
+      });
+      if (response.redirected || (response.url && new URL(response.url).origin !== location.origin)) {
+        throw new Error('论坛请求发生跳转，已拒绝结果，请先确认登录状态。');
+      }
+      if (response.status === 429) {
+        const value = response.headers.get('Retry-After');
+        const seconds = /^\d+$/.test(value || '') ? Number(value) : (Date.parse(value) - Date.now()) / 1000;
+        const delay = Math.max(1, Math.min(86400, Number.isFinite(seconds) ? Math.ceil(seconds) : 60));
+        cooldownUntil = Date.now() + delay * 1000;
+        throw new Error(`论坛限速，请约 ${delay} 秒后手动继续。`);
+      }
+      if ([401, 403, 500].includes(response.status)) {
+        throw new Error(`论坛返回 HTTP ${response.status}，可能未登录、需要浏览器验证或服务异常。请先打开论坛管理记录页确认，再手动继续。`);
+      }
+      if (!response.ok) throw new Error(`论坛请求失败（HTTP ${response.status}），请稍后手动继续。`);
+      if (Number(response.headers.get('Content-Length')) > 1024 * 1024) throw new Error('接口返回过大，已停止处理。');
+      const text = await response.text();
+      if (text.length > 1024 * 1024) throw new Error('接口返回过大，已停止处理。');
+      let data;
+      try { data = JSON.parse(text); } catch { throw new Error('论坛返回非 JSON 页面，请先确认登录状态或完成浏览器验证。'); }
+      if (data?.success === false) throw new Error('论坛未允许此次读取，请确认登录状态或稍后手动继续。');
+      if (data?.success !== true || !Array.isArray(data.data) || data.data.length > PAGE_SIZE ||
+          data.data.some((r) => !r || typeof r !== 'object' || Array.isArray(r)) ||
+          !Number.isSafeInteger(data.total) || data.total < 0) {
+        throw new Error('论坛接口数据格式已变化，请检查脚本更新。');
+      }
+      return data;
+    } catch (error) {
+      if (timedOut) throw new Error('请求超时，请稍后手动继续。');
+      if (signal.aborted) throw new Error('请求已取消。');
+      if (error instanceof TypeError) throw new Error('网络请求失败或跳转被拒绝，请检查连接与论坛登录状态。');
+      throw error;
+    } finally {
+      nextRequestAt = Date.now() + PAGE_DELAY;
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
+    }
+  }
+
+  function numericId(value) {
+    if (typeof value === 'number' && (!Number.isSafeInteger(value) || value <= 0)) return null;
+    if (typeof value !== 'number' && typeof value !== 'string') return null;
+    const normalized = String(value).replace(/^0+/, '');
+    return /^[1-9]\d*$/.test(normalized) ? normalized : null;
+  }
+
+  function normalizeRow(row) {
+    let detail;
+    try { detail = typeof row.request === 'string' ? JSON.parse(row.request) : row.request; } catch { /* Preserve the record even if details cannot be parsed. */ }
+    const actions = [];
+    let score = 0;
+    if (!detail || typeof detail !== 'object' || Array.isArray(detail)) {
+      actions.push('操作明细无法解析，请查看论坛原记录');
+      detail = {};
+    }
+    for (const [key, field, unit] of [['coin', 'coin_diff', '鸡腿'], ['stardust', 'stardust_diff', '星辰']]) {
+      const value = detail[key]?.[field];
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        actions.push(`${unit} ${value > 0 ? '+' : ''}${value}`);
+        if (value < 0) score = -1;
+        else if (value > 0 && score === 0) score = 1;
+      }
+    }
+    const summary = detail.postSummary;
+    if (summary && typeof summary === 'object') {
+      if (typeof summary.title === 'string') actions.push(`标题设为 ${summary.title}`);
+      if (typeof summary.category === 'string') actions.push(`移动版块：${summary.category}`);
+      if (typeof summary.rank === 'number') actions.push(`阅读权限设为 ${summary.rank}`);
+      if (typeof summary.locked === 'boolean') actions.push(summary.locked ? '锁定帖子' : '解锁帖子');
+      if (typeof summary.award === 'boolean') actions.push(summary.award ? '推荐阅读' : '撤销推荐阅读');
+    }
+    if (typeof detail.hideComment?.status === 'boolean') actions.push(detail.hideComment.status ? '隐藏内容' : '恢复内容');
+    if (typeof detail.pinComment?.status === 'boolean') actions.push(detail.pinComment.status ? '置顶' : '取消置顶');
+    if (detail.suspend && typeof detail.suspend === 'object') {
+      if (detail.suspend.status === false) actions.push('解除禁言');
+      else {
+        const days = detail.suspend.value;
+        const valid = (typeof days === 'number' && Number.isFinite(days) && days >= 0) ||
+          (typeof days === 'string' && /^\d+$/.test(days));
+        actions.push(valid ? `禁言：${days} 天` : '禁言：天数未提供');
+        score = -1;
+      }
+    }
+    const postId = numericId(row.post_id);
+    const id = numericId(row.id);
     return {
-      promise,
-      abort: () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        rejectRequest(new Error('请求已取消。'));
-        handle?.abort();
-      },
+      id: id || '-', category: score < 0 ? 'punish' : score > 0 ? 'reward' : 'manage',
+      reason: typeof detail.coin?.reason === 'string' ? detail.coin.reason : '-',
+      actions: actions.length ? actions : ['操作类型未识别，请查看论坛原记录'],
+      time: typeof row.created_at === 'string' ? row.created_at : typeof row.createdAt === 'string' ? row.createdAt : '',
+      admin: typeof row.admin_member_name === 'string' ? row.admin_member_name : '',
+      post_url: postId ? `https://www.nodeseek.com/post-${postId}-1` : null,
+      ruling_url: id ? `https://www.nodeseek.com/ruling#/id-${id}` : null,
     };
   }
 
@@ -224,58 +273,103 @@
       a.referrerPolicy = 'no-referrer';
       article.append(a);
     }
+    if (row.ruling_url) {
+      const a = el('a', ' 查看论坛原记录');
+      a.href = row.ruling_url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.referrerPolicy = 'no-referrer';
+      article.append(a);
+    }
     return article;
   }
 
-  function render(data) {
+  function render() {
+    const state = current;
+    if (!state) return;
     const content = modal.content;
     content.replaceChildren();
-    if (!data.found) {
-      content.append(el('p', '此索引未找到该账号的管理记录；这不代表该账号从未受到管理处理。'));
-      return;
-    }
-    const rows = data.records.slice(0, MAX_ROWS);
-    const total = Number(data.user?.total);
-    const incomplete = data.truncated || data.records.length > MAX_ROWS || (Number.isFinite(total) && total > rows.length);
-    content.append(el('p', `接口返回 ${data.records.length} 条记录${incomplete ? '（结果可能被截断，非全部记录）' : ''}。每次显示 30 条。`));
-    if (data.freshness?.latest_record) content.append(el('p', `索引最新记录时间：${data.freshness.latest_record}`));
+    content.append(el('p', `已检查最新记录的第 1–${state.pages} 页，匹配 ${state.rows.length} 条。未读取的页和更早历史不在结果内。`));
+    if (state.pages === 0) content.firstChild.textContent = '尚未完成任何页的读取。';
+    if (state.status) content.append(el('p', state.status, 'notice'));
+    if (state.pages > 0 && state.rows.length === 0) content.append(el('p', '已读取范围内未找到该账号的记录，不代表该账号从未受到管理处理。'));
+    if (state.changed) content.append(el('p', '读取期间记录总数发生变化，分页可能移动；去重不能保证没有遗漏，可稍后重新查询。', 'notice'));
+    if (state.skipped) content.append(el('p', `${state.skipped} 条记录缺少有效 UID，无法判断归属，结果可能不完整。`, 'notice'));
+    if (state.total > MAX_PAGES * PAGE_SIZE) content.append(el('p', '记录总量超出论坛的 100 页读取上限，较早记录无法通过此方式检查。', 'notice'));
     const list = el('div');
-    let shown = 0;
-    const more = button('显示更多', () => append());
-    function append() {
-      const next = rows.slice(shown, shown + 30);
-      list.append(...next.map(recordNode));
-      shown += next.length;
-      more.hidden = shown >= rows.length;
-      more.textContent = `显示更多（剩余 ${rows.length - shown} 条）`;
+    list.append(...state.rows.slice(0, state.visible).map(recordNode));
+    content.append(list);
+    if (state.visible < state.rows.length) {
+      content.append(button(`显示更多已匹配记录（剩余 ${state.rows.length - state.visible} 条）`, () => {
+        state.visible += 30;
+        render();
+      }));
     }
-    content.append(list, more);
-    append();
+    if (state.busy) {
+      const stop = button('停止本轮', () => {
+        cancel();
+        state.busy = false;
+        state.status = '已停止，保留本轮已完成的页；可手动继续。';
+        render();
+      });
+      stop.dataset.action = 'stop';
+      content.append(stop);
+    } else if (!state.ended) {
+      const next = button(state.pages ? `从第 ${state.nextPage} 页继续（最多 5 页）` : '重新读取最近 5 页', () => runQuery());
+      next.dataset.action = 'query';
+      content.append(next);
+    }
   }
 
   async function runQuery() {
     if (!current) return;
     cancel();
     const ticket = generation;
-    const user = current;
-    const retry = () => {
-      const b = button('重试查询', () => runQuery());
-      b.dataset.action = 'query';
-      return b;
-    };
+    const state = current;
+    if (state.ended) return;
     if (Date.now() < cooldownUntil) {
-      modal.content.replaceChildren(el('p', `查询限速中，请 ${Math.ceil((cooldownUntil - Date.now()) / 1000)} 秒后重试。`), retry());
+      state.status = `论坛限速中，请 ${Math.ceil((cooldownUntil - Date.now()) / 1000)} 秒后手动继续。`;
+      render();
       return;
     }
-    modal.content.replaceChildren(el('p', '加载中…关闭窗口可取消请求。'));
-    active = request(user.uid);
+    const controller = new AbortController();
+    active = controller;
+    state.busy = true;
     try {
-      const data = await active.promise;
-      if (ticket === generation && modal.dialog.open) render(data);
+      for (let count = 0; count < BATCH_PAGES && !state.ended; count += 1) {
+        state.status = `正在读取第 ${state.nextPage} 页…可停止本轮或关闭窗口。`;
+        render();
+        const delay = nextRequestAt - Date.now();
+        if (delay > 0) await wait(controller.signal, delay);
+        if (ticket !== generation || controller.signal.aborted) return;
+        const data = await request(state.nextPage, controller.signal);
+        if (ticket !== generation || current !== state || !modal.dialog.open) return;
+        if (state.total !== null && state.total !== data.total) state.changed = true;
+        state.total = data.total;
+        state.lastPage = Math.min(MAX_PAGES, Math.max(1, Math.ceil(data.total / PAGE_SIZE)));
+        for (const row of data.data) {
+          const uid = numericId(row.target_member_id);
+          if (!uid) { state.skipped += 1; continue; }
+          if (uid !== numericId(state.uid)) continue;
+          const id = numericId(row.id);
+          if (id && state.seen.has(id)) continue;
+          if (id) state.seen.add(id);
+          state.rows.push(normalizeRow(row));
+        }
+        state.pages += 1;
+        state.nextPage += 1;
+        state.ended = data.data.length === 0 || state.nextPage > state.lastPage;
+        render();
+      }
+      state.status = state.ended ? '已到当前接口可读取的范围末尾；不保证覆盖全部历史。' : '本轮已完成，继续检查更早记录需手动点击。';
     } catch (error) {
-      if (ticket === generation && modal.dialog.open) modal.content.replaceChildren(el('p', error.message), retry());
+      if (ticket === generation && current === state) state.status = error.message;
     } finally {
-      if (ticket === generation) active = null;
+      if (ticket === generation && current === state) {
+        active = null;
+        state.busy = false;
+        render();
+      }
     }
   }
 
