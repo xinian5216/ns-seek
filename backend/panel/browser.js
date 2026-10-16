@@ -5,7 +5,7 @@
   let ready = false; let previous; let busyFrame = false; let queue = Promise.resolve(); let wheelAt = 0;
   const request = async (route,value) => {
     const response = await fetch(route,{method:value === undefined ? 'GET' : 'POST',credentials:'same-origin',cache:'no-store',
-      headers:value === undefined ? {} : {'Content-Type':'application/json'},body:value === undefined ? undefined : JSON.stringify(value),signal:AbortSignal.timeout(30000)});
+      headers:value === undefined ? {} : {'Content-Type':'application/json'},body:value === undefined ? undefined : JSON.stringify(value),signal:AbortSignal.timeout(60000)});
     if (response.status === 401) { ready = false; location.assign('/'); throw new Error('登录已过期，请重新登录面板。'); }
     if (!response.ok) throw new Error(response.status === 409 ? '请先暂停自动采集，再控制浏览器。' : '浏览器暂时没有回应，请稍后重试。');
     return response;
@@ -52,7 +52,8 @@
     catch (error) { message.textContent=error.message; el('enable').disabled=false; }
   };
   try {
-    await request('/owner/automation/pause',{}); ready=true;
+    message.textContent='正在启动专用浏览器，首次画面可能需要数十秒…';
+    await request('/owner/browser/open',{}); ready=true;
     message.textContent='采集已暂停。请在画面中正常登录或验证，完成后点击「验证并启用自动同步」。';
     const refresh = async () => { await frame(); if (ready) setTimeout(refresh,1000); };
     await refresh();

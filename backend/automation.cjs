@@ -17,15 +17,15 @@ function packet(row) {
     post_id:row.post_id != null && Number(row.post_id) > 0 ? id(row.post_id) : null,
     request:JSON.stringify({suspend,coin:{reason:request.coin?.reason}})};
 }
-function createAutomation({store,browser,stateDir,now = Date.now,delay = 1200,maxHistory = 200,schedule = true,resources = () => true} = {}) {
+function createAutomation({store,browser,stateDir,now = Date.now,delay = 1200,maxHistory = 200,schedule = true,resources = () => true,onEvent = async()=>{}} = {}) {
   const file = path.join(stateDir,'automation.json');
-  let state = {enabled:false,blocked:null,resumeAfter:0,nextRecentAt:0,nextHistoryAt:0,lastRunAt:null,lastSuccessAt:null};
+  let state = {enabled:false,blocked:null,resumeAfter:0,nextRecentAt:0,nextHistoryAt:0,lastRunAt:null,lastSuccessAt:null,lastRecentSuccessAt:null,incidentAt:null};
   if (fs.existsSync(file)) {
     try {
       const saved = JSON.parse(fs.readFileSync(file,'utf8'));
       state.enabled = saved.enabled === true;
       state.blocked = ERRORS.includes(saved.blocked) ? saved.blocked : null;
-      for (const key of ['resumeAfter','nextRecentAt','nextHistoryAt','lastRunAt','lastSuccessAt']) {
+      for (const key of ['resumeAfter','nextRecentAt','nextHistoryAt','lastRunAt','lastSuccessAt','lastRecentSuccessAt','incidentAt']) {
         if (Number.isSafeInteger(saved[key]) && saved[key] >= 0) state[key] = saved[key];
       }
     } catch { state.enabled = false; }
@@ -38,7 +38,8 @@ function createAutomation({store,browser,stateDir,now = Date.now,delay = 1200,ma
     return Math.min(state.nextRecentAt,store.plan().nextId > 0 ? state.nextHistoryAt : Infinity);
   }
   function status() {
-    return {available:true,...state,running:!!running,...current,nextRunAt:nextTime(),recentIntervalHours:6,historyIntervalMinutes:15};
+    return {available:true,...state,running:!!running,...current,nextRunAt:nextTime(),recentIntervalHours:6,historyIntervalMinutes:15,browser:browser.status?.()||null,
+      recentOverdue:state.enabled&&!state.blocked&&state.nextRecentAt>0&&now()>state.nextRecentAt+30*60*1000};
   }
   function arm() {
     clearTimeout(timer);
@@ -57,6 +58,7 @@ function createAutomation({store,browser,stateDir,now = Date.now,delay = 1200,ma
   });
   async function collect(signal) {
     if (!resources()) throw new Error('resource_limit');
+    if(browser.wake)await browser.wake();signal.throwIfAborted();
     const recentDue = state.nextRecentAt <= now();
     const fetchOne = async (kind,number) => {
       signal.throwIfAborted();
@@ -77,7 +79,7 @@ function createAutomation({store,browser,stateDir,now = Date.now,delay = 1200,ma
         if (!data.data.length || (overlap && result.allKnown)) break;
       }
       state.nextRecentAt = now() + RECENT_INTERVAL;
-      state.lastSuccessAt = now(); persist();
+      state.lastSuccessAt = now(); state.lastRecentSuccessAt=now();persist();
     }
     let plan = store.plan();
     if (plan.nextId > 0 && state.nextHistoryAt <= now()) {
@@ -105,24 +107,32 @@ function createAutomation({store,browser,stateDir,now = Date.now,delay = 1200,ma
     const signal = controller.signal;
     state.lastRunAt = now(); persist();
     running = (async () => {
-      try { await collect(signal); }
+      let event;
+      try { await collect(signal); if(!signal.aborted&&state.incidentAt!==null){event={type:'recovered',incidentAt:state.incidentAt,lastSuccessAt:state.lastSuccessAt};state.incidentAt=null;persist();} }
       catch (error) {
         if (!signal.aborted) {
           state.blocked = ERRORS.includes(error.message) ? error.message : 'format_error';
           state.resumeAfter = state.blocked === 'rate_limited' ? now() + (error.retryAfter || 60) * 1000 : 0;
+          if(state.incidentAt===null){state.incidentAt=now();event={type:'blocked',incidentAt:state.incidentAt,code:state.blocked,lastSuccessAt:state.lastSuccessAt};}
           persist();
         }
-      } finally { running = null; current = {stage:'none',page:null,recordId:null}; arm(); }
+      } finally {
+        try {await browser.sleep?.();}catch{
+          if(state.enabled&&!state.blocked){state.blocked='browser_unavailable';if(state.incidentAt===null){state.incidentAt=now();event={type:'blocked',incidentAt:state.incidentAt,code:state.blocked,lastSuccessAt:state.lastSuccessAt};}persist();}
+        }
+        if(event)try{await onEvent(event.type,event);}catch{/* Notification failure must not corrupt the collection plan. */}
+        running = null; current = {stage:'none',page:null,recordId:null}; arm();
+      }
     })();
     return running;
   }
   function enable() {
     if (state.resumeAfter > now()) throw new Error('rate_limited');
-    state.enabled = true; state.blocked = null; state.resumeAfter = 0; state.nextRecentAt = 0;
+    browser.automatic?.();state.enabled = true; state.blocked = null; state.resumeAfter = 0; state.nextRecentAt = 0;
     persist(); run().catch(() => {}); return status();
   }
   function pause() {
-    state.enabled = false; clearTimeout(timer); controller?.abort(); persist(); return status();
+    state.enabled = false; clearTimeout(timer); controller?.abort(); persist();if(!running)browser.sleep?.().catch(()=>{});return status();
   }
   async function close() { closed = true; clearTimeout(timer); controller?.abort(); await running; }
   arm();

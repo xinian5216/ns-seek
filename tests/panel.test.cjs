@@ -37,3 +37,9 @@ test('network refresh failures preserve login and clipboard fallback exposes onl
  assert.equal(s.el('pair-fallback').hidden,false);assert.equal(s.el('pair-code').value,s.code);
  await [...s.timers.values()].find(x=>x.ms===300000).fn();assert.equal(s.el('pair-code').value,'');assert.equal(s.el('pair-fallback').hidden,true);
 });
+
+test('panel distinguishes browser sleep, collection failure, and configured but failed notifications',async t=>{
+ const s=await setup(t);const next=initial();next.automation={available:true,enabled:true,running:false,blocked:'login_required',browser:{awake:false,manual:false},nextRunAt:null};
+ next.notifications={enabled:true,configured:true,lastError:'network_error',lastSentAt:null};s.data(next);await s.el('refresh').onclick();
+ assert.match(s.el('auto-state').textContent,/登录失效/);assert.match(s.el('auto-detail').textContent,/已休眠/);assert.match(s.el('notify-status').textContent,/连接 Telegram 失败/);assert.equal(s.el('notify-token').value,'');
+});

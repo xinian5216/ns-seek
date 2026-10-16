@@ -8,8 +8,9 @@ User=ns-seek-browser
 Group=ns-seek-browser
 Environment=HOME=/var/lib/ns-seek-browser
 ExecStart=/bin/sh /opt/ns-seek/app/deploy/start-browser.sh
-Restart=on-failure
-RestartSec=10
+Restart=no
+KillSignal=SIGTERM
+TimeoutStopSec=20
 UMask=0077
 PrivateTmp=true
 ProtectSystem=strict

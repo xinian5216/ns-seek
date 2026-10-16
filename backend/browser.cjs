@@ -72,18 +72,18 @@ function createBrowser({ fetcher = fetch, Socket = WebSocket } = {}) {
     })();
     try { await connecting; } finally { connecting = null; }
   }
-  function send(method,params = {}) {
+  function send(method,params = {},timeoutMs=22000) {
     return new Promise((resolve,reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => { pending.delete(id); reject(fault('browser_unavailable')); },22000);
+      const timer = setTimeout(() => { pending.delete(id); reject(fault('browser_unavailable')); },timeoutMs);
       pending.set(id,{resolve,reject,timer});
       try { socket.send(JSON.stringify({id,method,params})); }
       catch { clearTimeout(timer); pending.delete(id); reject(fault('browser_unavailable')); }
     });
   }
-  const call = async (method,params) => { await connect(); return send(method,params); };
+  const call = async (method,params,timeoutMs) => { await connect(); return send(method,params,timeoutMs); };
   async function info() {
-    const result = await call('Runtime.evaluate',{expression:'({origin:location.origin,path:location.pathname})',returnByValue:true});
+    const result = await call('Runtime.evaluate',{expression:'({origin:location.origin,path:location.pathname})',returnByValue:true},5000);
     const value = result.result?.value;
     return { ready:true, onForum:value?.origin === FORUM, width:WIDTH,height:HEIGHT };
   }
@@ -115,6 +115,7 @@ function createBrowser({ fetcher = fetch, Socket = WebSocket } = {}) {
     signal?.throwIfAborted();
     return decodeForum(result.result?.value,kind,number);
   }
-  return {info,frame,action,read,close:() => { stopped = true; rejectAll(); socket?.close(); }};
+  const disconnect = () => { rejectAll(); const old=socket;socket=null;if(old){old.onclose=null;old.close();} };
+  return {info,frame,action,read,disconnect,close:() => { stopped = true; disconnect(); }};
 }
 module.exports = {createBrowser,validateAction,decodeForum,FORUM,WIDTH,HEIGHT};

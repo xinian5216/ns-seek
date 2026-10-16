@@ -45,3 +45,13 @@ test('browser collection treats challenges, login, rate limits and changed field
  for(const [response,message] of [[{status:403},'verification_required'],[{status:401},'login_required'],[{status:429,retryAfter:120},'rate_limited'],[{status:200,json:false},'login_or_verification_required'],[{status:200,json:true,value:{success:true,data:[raw(2)]}},'format_error']])assert.throws(()=>decodeForum(response,'id',1),new RegExp(message));
  assert.equal(decodeForum({status:200,json:true,value:{success:true,total:1,data:[raw(1)]}},'page',1).data.length,1);
 });
+
+test('a durable incident sends one failure event and recovery only after successful collection',async t=>{
+ const events=[];const s=setup(t,{onEvent:async(type,value)=>events.push({type,...value})});
+ const original=s.browser.read;let fail=true;let wakes=0,sleeps=0;s.browser.wake=async()=>{wakes++};s.browser.sleep=async()=>{sleeps++};
+ s.browser.read=async(...args)=>{if(fail)throw new Error('login_required');return original(...args)};
+ s.auto.enable();await s.auto.run();assert.equal(events.length,1);assert.equal(events[0].type,'blocked');assert.equal(sleeps,1);
+ s.advance(60000);s.auto.enable();await s.auto.run();assert.equal(events.length,1);assert.equal(sleeps,2);
+ fail=false;s.advance(60000);s.auto.enable();await s.auto.run();assert.equal(events.length,2);assert.equal(events[1].type,'recovered');assert.equal(events[0].incidentAt,events[1].incidentAt);assert.equal(wakes,3);assert.equal(sleeps,3);
+ assert.equal(s.auto.status().incidentAt,null);assert.equal(s.auto.status().lastRecentSuccessAt,s.now());
+});

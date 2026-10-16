@@ -85,6 +85,11 @@ test('unpaired user sees setup guidance without sending requests or exposing cre
   assert.ok(!s.text().includes(s.keys.queryToken));
 });
 
+test('a paused collector is visible in query results without extra forum or service requests',async t=>{
+ const s=setup(t);s.open();s.requests[0].respond(queryResult([raw()],{automation:{enabled:true,blocked:'login_required'}}));await tick();
+ assert.match(s.text(),/自动采集已暂停：论坛登录失效/);assert.equal(s.root().querySelectorAll('article').length,1);assert.equal(s.requests.length,1);assert.equal(s.forum.length,0);
+});
+
 test('pair code is removed from URL; long-term keys stay in GM storage and are not rendered', async (t) => {
   const code = crypto.randomBytes(32).toString('base64url');
   const s = setup(t, { paired: false, url: 'https://www.nodeseek.com/ruling#ns-seek-pair=' + code, beforeReady(w) { w.history.replaceState(null, '', '/ruling#/p-1'); } });

@@ -6,6 +6,13 @@
   let poll;
   let clearCode;
   let manualConfigured = false;
+  let notifyLoaded = false;
+  const notifyStatus = value => {
+    if(!value)return;
+    const errors={invalid_token:'Bot Token 无效',rate_limited:'Telegram 限速',network_error:'连接 Telegram 失败',delivery_failed:'发送失败，请确认已向 Bot 发送 /start，且 Chat ID 正确'};
+    el('notify-status').textContent=`${value.enabled?'已启用异常／恢复提醒':value.configured?'通知已暂停':'尚未配置，关闭面板后不会主动提醒'}。${value.lastSentAt?'最近发送：'+new Date(value.lastSentAt).toLocaleString()+'。':''}${value.lastError?'通知异常：'+(errors[value.lastError]||'发送失败')+'。':''}`;
+    if(!notifyLoaded){el('notify-enabled').checked=value.enabled;notifyLoaded=true;}
+  };
   const request = async (url, data) => {
     const response = await fetch(url, { method: data === undefined ? 'GET' : 'POST', credentials: 'same-origin',
       headers: data === undefined ? {} : { 'Content-Type': 'application/json' }, body: data === undefined ? undefined : JSON.stringify(data), signal: AbortSignal.timeout(10000) });
@@ -27,14 +34,18 @@
     el('last').textContent = data.archive.lastSync ? new Date(data.archive.lastSync).toLocaleString() : '尚未同步';
     el('login').hidden = true; el('controls').hidden = false;
     const auto = data.automation;
+    notifyStatus(data.notifications);
     el('automation').hidden = !auto?.available;
     if (!manualConfigured) { el('manual').open = !auto?.available; manualConfigured = true; }
     if (auto?.available) {
       const reasons = {verification_required:'需要你完成论坛验证，采集已暂停',login_required:'论坛登录失效，采集已暂停',login_or_verification_required:'需要论坛登录或浏览器验证，采集已暂停',rate_limited:'论坛限速，采集已暂停',network_error:'网络异常，采集已暂停',browser_unavailable:'专用浏览器暂不可用，采集已暂停',resource_limit:'VPS 可用内存不足，采集已暂停',format_error:'接口格式发生变化，采集已暂停',forum_error:'论坛服务异常，采集已暂停'};
       el('auto-state').textContent = auto.blocked ? reasons[auto.blocked] || '采集已暂停，请检查浏览器' : auto.running ? 'VPS 正在自动采集，电脑可以关闭' : auto.enabled ? '已启用，等待下次自动采集' : '自动采集尚未启用／已手动暂停';
+      if(auto.recentOverdue)el('auto-state').textContent='新增记录检查已超时，请检查任务；当前显示的是已存档数据';
+      el('auto-state').dataset.warning=String(!!auto.blocked||!!auto.recentOverdue);
       const phase = auto.stage === 'recent' ? `正在读取第 ${auto.page} 页。` : auto.stage === 'history' ? `正在补采编号 ${auto.recordId}。` : auto.stage === 'verify' ? '正在验证历史读取入口。' : '';
       const date = value => value ? new Date(value).toLocaleString() : '尚无';
-      el('auto-detail').textContent = `${phase}最近成功采集：${date(auto.lastSuccessAt)}。${auto.nextRunAt !== null ? `下次计划：${date(auto.nextRunAt)}。` : ''}${auto.resumeAfter ? `最早可手动恢复：${date(auto.resumeAfter)}。` : ''}${auto.blocked ? '请打开 VPS 浏览器处理，再点击验证并启用。' : ''}`;
+      const browser=auto.browser?`浏览器：${auto.browser.awake?'已启动'+(auto.browser.manual?'（人工操作中）':''):'已休眠，不占用浏览器内存'}。`:'';
+      el('auto-detail').textContent = `${phase}${browser}最近成功检查新增：${date(auto.lastRecentSuccessAt)}。最近成功采集：${date(auto.lastSuccessAt)}。${auto.nextRunAt !== null ? `下次计划：${date(auto.nextRunAt)}。` : ''}${auto.resumeAfter ? `最早可手动恢复：${date(auto.resumeAfter)}。` : ''}${auto.blocked ? '请打开 VPS 浏览器处理，再点击验证并启用。' : ''}`;
       el('auto-count').textContent = `已检查 ${data.archive.checkedIds ?? 0} 个记录编号，保留 ${data.archive.count} 条一年内封禁／解封。`;
     }
     const sync = data.sync || { state: 'idle', paired: data.paired };
@@ -57,6 +68,16 @@
     catch (e) { message.textContent = e.message; }
   };
   el('refresh').onclick = () => refresh(true).catch(refreshError);
+  el('notify-form').onsubmit=async event=>{
+    event.preventDefault();
+    const value={enabled:el('notify-enabled').checked,token:el('notify-token').value.trim(),chatId:el('notify-chat').value.trim()};
+    el('notify-token').value='';el('notify-chat').value='';
+    try{const result=await request('/owner/notifications',value);notifyStatus(result.notifications);el('notify-feedback').textContent='通知设置已保存，请点击发送测试提醒确认。';}
+    catch{el('notify-feedback').textContent='保存失败。请检查 Token 和正整数私聊 Chat ID，或重新登录面板。';}
+  };
+  for(const [id,route,value]of[['notify-test','/owner/notifications/test',{}],['notify-clear','/owner/notifications',{enabled:false,clear:true}]]){
+    el(id).onclick=async()=>{el(id).disabled=true;try{const result=await request(route,value);notifyLoaded=false;notifyStatus(result.notifications);el('notify-feedback').textContent=id==='notify-clear'?'通知密钥已删除。':result.notifications.lastError?'测试发送失败，请查看通知状态。':'测试已发送，请确认 Telegram 收到消息。';}catch{el('notify-feedback').textContent='未能完成，请先保存有效设置；测试每分钟最多一次。';}finally{el(id).disabled=false;}};
+  }
   for (const [id,route] of [['auto-enable','enable'],['auto-pause','pause']]) {
     el(id).onclick = async () => {
       el(id).disabled = true;

@@ -1,5 +1,9 @@
 # Backend API
 
+- Owner session only: `GET/POST /owner/notifications` reads redacted status or updates `{enabled,token?,chatId?,clear?}`. Empty credentials preserve stored values; positive numeric private chat IDs only. `POST /owner/notifications/test {}` sends a fixed test, at most once per minute. No stored credential is returned.
+- `POST /owner/browser/open {}` pauses collection, starts the managed browser and enters manual control. Frames/actions renew a ten-minute manual idle lease. Enabling automation releases manual control; the browser sleeps after a batch.
+- User lookup includes safe automation pause/overdue metadata. No notification credentials or browser access are added to query scope.
+
 Fixed public origin: `https://ns.042804.xyz:8443`. Backend listens only on `127.0.0.1:18765`; the reverse proxy overwrites Host accordingly. No native cross-origin CORS. No Cookie from NodeSeek is accepted or required.
 
 - `GET /health`: public service identifier/version only.

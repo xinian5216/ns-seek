@@ -1,0 +1,9 @@
+// Allow only start/stop of this fixed, root-owned unit; no other system management.
+polkit.addRule(function(action, subject) {
+  if (subject.user === "ns-seek" &&
+      action.id === "org.freedesktop.systemd1.manage-units" &&
+      action.lookup("unit") === "ns-seek-browser.service" &&
+      (action.lookup("verb") === "start" || action.lookup("verb") === "stop")) {
+    return polkit.Result.YES;
+  }
+});

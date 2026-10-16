@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NS 管理记录快捷查看 · 独立维护版
 // @namespace    https://github.com/xinian5216/ns-seek
-// @version      1.3.0
+// @version      1.4.0
 // @description  查询私人封禁档案，支持 VPS 自动采集和电脑手动补采，无第三方查询服务。
 // @match        https://www.nodeseek.com/post-*
 // @match        https://www.nodeseek.com/ruling*

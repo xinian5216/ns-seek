@@ -10,7 +10,7 @@ const random = () => crypto.randomBytes(32).toString('base64url');
 const equal = (a, b) => typeof a === 'string' && /^[A-Za-z0-9_-]{43}$/.test(a) && typeof b === 'string' && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 function createApp({ store, queryToken = random(), syncToken = random(), adminToken = random(), passwordHash = null,
-  publicOrigin = null, persist = () => {}, now = Date.now, browser = null, automation = null } = {}) {
+  publicOrigin = null, persist = () => {}, now = Date.now, browser = null, automation = null, notifications = null } = {}) {
   if (publicOrigin && !/^https:\/\/ns\.042804\.xyz(?::8443)?$/.test(publicOrigin)) throw new Error('Invalid public origin');
   const setupCodes = new Map();
   const pairCodes = new Map();
@@ -121,8 +121,21 @@ function createApp({ store, queryToken = random(), syncToken = random(), adminTo
       }
       if (url.pathname.startsWith('/owner/')) {
         if (!local) { reply(res,403,{ok:false,error:'owner_session_required'}); return; }
+        if (notifications && !url.search && url.pathname === '/owner/notifications') {
+          if(req.method==='GET'){reply(res,200,{ok:true,notifications:notifications.status()});return;}
+          if(req.method==='POST'){const value=await body(req);if(!ownerValid()){reply(res,401,{ok:false,error:'unauthorized'});return;}reply(res,200,{ok:true,notifications:notifications.configure(value)});return;}
+        }
+        if(notifications && !url.search && req.method==='POST' && url.pathname==='/owner/notifications/test'){
+          await body(req);if(!ownerValid()){reply(res,401,{ok:false,error:'unauthorized'});return;}
+          const value=await notifications.test();reply(res,200,{ok:true,notifications:value});return;
+        }
         if (!browser || !automation) { reply(res,503,{ok:false,error:'browser_unavailable'}); return; }
         if (url.search) throw new Error('invalid_body');
+        if(req.method==='POST' && url.pathname==='/owner/browser/open'){
+          await body(req);if(!ownerValid()){reply(res,401,{ok:false,error:'unauthorized'});return;}
+          const opening=browser.manual?.();automation.pause();await opening;
+          reply(res,200,{ok:true});return;
+        }
         if (req.method === 'POST' && url.pathname === '/owner/automation/pause') {
           await body(req); if (!ownerValid()) { reply(res,401,{ok:false,error:'unauthorized'}); return; }
           reply(res,200,{ok:true,automation:automation.pause()}); return;
@@ -171,7 +184,7 @@ function createApp({ store, queryToken = random(), syncToken = random(), adminTo
         setImmediate(() => server.close()); return;
       }
       if (req.method === 'GET' && url.pathname === '/local/status' && local && !url.search) {
-        reply(res, 200, { ok: true, paired, sync: syncStatus(), archive: store.status(), automation: automation?.status() || {available:false} }); return;
+        reply(res, 200, { ok: true, paired, sync: syncStatus(), archive: store.status(), automation: automation?.status() || {available:false}, notifications:notifications?.status()||null }); return;
       }
       if (req.method === 'POST' && url.pathname === '/local/pair' && local) {
         await body(req);
@@ -202,7 +215,9 @@ function createApp({ store, queryToken = random(), syncToken = random(), adminTo
       if (req.method === 'GET' && url.pathname === '/v1/user' && scope === 'query') {
         if ([...url.searchParams.keys()].some((k) => !['uid', 'before', 'limit'].includes(k)) ||
             ['uid', 'before', 'limit'].some((k) => url.searchParams.getAll(k).length > 1)) throw new Error('invalid_record');
-        reply(res, 200, { ok: true, ...store.query(url.searchParams.get('uid'), url.searchParams.get('before'), Number(url.searchParams.get('limit') || 50)) }); return;
+        const auto=automation?.status();
+        reply(res, 200, { ok: true, ...store.query(url.searchParams.get('uid'), url.searchParams.get('before'), Number(url.searchParams.get('limit') || 50)),
+          automation:auto?{enabled:auto.enabled,blocked:auto.blocked,lastRecentSuccessAt:auto.lastRecentSuccessAt,nextRecentAt:auto.nextRecentAt,recentOverdue:auto.recentOverdue}:null }); return;
       }
       reply(res, 403, { ok: false, error: 'route_or_scope_denied' });
     } catch (error) {
@@ -228,25 +243,28 @@ if (require.main === module) {
   const publicOrigin = process.env.NS_SEEK_PUBLIC_ORIGIN || secrets.publicOrigin || null;
   if (publicOrigin && !secrets.passwordHash) throw new Error('Public service requires an initialized password');
   const store = openStore(path.join(stateDir, 'archive.sqlite'));
+  const notifications=require('./notifications.cjs').createNotifications({stateDir});
   let browser = null; let automation = null;
   if (process.env.NS_SEEK_BROWSER === '1') {
     browser = require('./browser.cjs').createBrowser();
+    if(process.env.NS_SEEK_BROWSER_MANAGED==='1')browser=require('./managed-browser.cjs').createManagedBrowser({browser});
     const resources = () => {
       if (process.platform !== 'linux') return true;
       const available = Number(fs.readFileSync('/proc/meminfo','utf8').match(/^MemAvailable:\s+(\d+)/m)?.[1]);
       return Number.isFinite(available) && available >= 96 * 1024;
     };
-    automation = require('./automation.cjs').createAutomation({store,browser,stateDir,resources});
+    automation = require('./automation.cjs').createAutomation({store,browser,stateDir,resources,onEvent:notifications.event});
+    if(process.env.NS_SEEK_BROWSER_MANAGED==='1')browser.sleep().catch(()=>{});
   }
   const persist = (value) => {
     const temporary = secretsFile + '.tmp';
     fs.writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 });
     fs.renameSync(temporary, secretsFile);
   };
-  const app = createApp({ store, ...secrets, publicOrigin, persist, browser, automation });
+  const app = createApp({ store, ...secrets, publicOrigin, persist, browser, automation, notifications });
   const maintenance = setInterval(() => store.purge(), 60 * 60 * 1000);
   maintenance.unref();
-  app.server.once('close', async () => { clearInterval(maintenance); await automation?.close(); browser?.close(); store.close(); });
+  app.server.once('close', async () => { clearInterval(maintenance); await automation?.close(); await browser?.close(); store.close(); });
   app.server.on('error', () => { console.error('Local service could not start; check port 18765.'); store.close(); process.exitCode = 1; });
   app.server.listen(18765, '127.0.0.1', () => {
     fs.writeFileSync(path.join(stateDir, 'connect-url.txt'), `${publicOrigin || 'http://127.0.0.1:18765'}/#setup=${app.setupCode()}`, { mode: 0o600 });

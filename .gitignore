@@ -11,6 +11,8 @@ coverage/
 playwright-report/
 test-results/
 .private/
+notifications.json
+automation.json
 *.sqlite
 *.sqlite-*
 *.db

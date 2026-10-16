@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NS 管理记录快捷查看 · 独立维护版
 // @namespace    https://github.com/xinian5216/ns-seek
-// @version      1.3.0
+// @version      1.4.0
 // @description  查询私人封禁档案，支持 VPS 自动采集和电脑手动补采，无第三方查询服务。
 // @match        https://www.nodeseek.com/post-*
 // @match        https://www.nodeseek.com/ruling*
@@ -366,6 +366,12 @@
       content.append(el('p', `历史补采进度：下一个待检查编号 ${state.archive.nextId}，当前已知最新编号 ${state.archive.latestId}。档案不保证完整。`));
     }
     if (state.status) content.append(el('p', state.status, 'notice'));
+    if(state.mode==='user'&&state.automation){
+      const auto=state.automation;
+      const reasons={verification_required:'论坛需要验证',login_required:'论坛登录失效',login_or_verification_required:'需要登录或验证',rate_limited:'论坛限速',network_error:'采集网络异常',browser_unavailable:'采集浏览器不可用',resource_limit:'VPS 内存不足',format_error:'论坛接口变化',forum_error:'论坛服务异常'};
+      const warning=auto.blocked?'自动采集已暂停：'+(reasons[auto.blocked]||'需要检查')+'。':auto.recentOverdue?'新增记录检查超时。':auto.enabled===false?'自动采集已手动暂停。':'';
+      if(warning){content.append(el('p',warning+'以下仍可查询已存档记录；请到私人面板处理。','notice'));content.append(button('打开私人面板',()=>openLocal()));}
+    }
     if (state.mode === 'sync' && !credentials()) {
       content.append(el('p', '尚未配对，暂时不能同步。请在私人面板点击「连接油猴」。如果自动连接失败，复制面板的一次性连接码并粘贴到下面。'));
       content.append(button('打开私人面板', () => openLocal()));
@@ -428,6 +434,7 @@
       state.nextBeforeId = numericId(data.nextBeforeId);
       state.total = data.total;
       state.archive = validArchive(data.archive);
+      state.automation=data.automation&&typeof data.automation==='object'?data.automation:null;
       state.status = '查询完成。结果来自已存档记录，历史覆盖取决于同步进度。';
     } catch (error) {
       if (ticket === generation && current === state) state.status = error.message;
