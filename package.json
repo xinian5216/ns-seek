@@ -1,14 +1,15 @@
 {
   "name": "ns-seek-userscript",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Independently maintained NodeSeek public moderation record userscript",
   "license": "MIT",
   "engines": { "node": "^22.22.2 || ^24.15.0 || >=26.0.0" },
   "scripts": {
     "build": "node scripts/metadata.cjs --write",
-    "check": "node --check ns-seek.user.js && node scripts/metadata.cjs && node scripts/privacy-check.cjs",
-    "test": "node --test tests/*.test.cjs"
+    "check": "node --check ns-seek.user.js && node --check backend/server.cjs && node --check backend/store.cjs && node --check backend/password.cjs && node --check backend/control.cjs && node --check backend/panel/panel.js && node scripts/metadata.cjs && node scripts/privacy-check.cjs && node scripts/public-tree-check.cjs",
+    "test": "node --test tests/*.test.cjs",
+    "start": "node backend/server.cjs"
   },
   "devDependencies": { "jsdom": "30.1.3" }
 }

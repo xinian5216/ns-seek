@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>我的封禁档案</title><link rel="stylesheet" href="/panel.css"><script src="/panel.js" defer></script></head>
+<body><main><p class="eyebrow">NS SEEK · 私人档案</p><h1>我的封禁档案</h1><p>只保留最近 365 天的封禁与解封记录，到期自动清理。论坛 Cookie 始终留在你的浏览器中。</p>
+<p id="message" role="status">正在连接…</p>
+<form id="login" hidden><label>访问密码<input id="password" type="password" autocomplete="current-password" required maxlength="128"></label><button type="submit">登录</button></form>
+<section id="controls" hidden><div class="stats"><div><strong id="count">0</strong><span>一年内已存档记录</span></div><div><strong id="last">—</strong><span>最近同步</span></div></div>
+<button id="pair" type="button">连接油猴并打开同步窗口</button><button id="refresh" type="button">刷新档案状态</button>
+<ol><li><a href="https://raw.githubusercontent.com/xinian5216/ns-seek/main/ns-seek.user.js" target="_blank" rel="noopener noreferrer">安装或更新油猴脚本</a>，允许访问档案服务。</li><li>先在同一个浏览器中登录 NodeSeek，再点击上方连接按钮。</li><li>选择「同步档案」，先同步最近记录，再向前补采一年内记录。同步窗口需保持打开。</li><li>回到帖子点击用户的「管理记录」，直接查询私人档案。</li></ol>
+<p class="note">首次补采可能耗时较长，可停止后续传。只覆盖论坛允许读取且已同步的记录；遇到登录失效或限速会停止。</p>
+<details><summary>更换密码并撤销旧连接</summary><p>新密码需 24–128 位，含大小写字母、数字和符号。更换后所有旧登录和油猴密钥立即失效，请重新连接油猴。</p><form id="rotate"><label>当前密码<input id="current-password" type="password" autocomplete="current-password" maxlength="128" required></label><label>新密码<input id="new-password" type="password" autocomplete="new-password" minlength="24" maxlength="128" required></label><button id="generate" type="button">生成复杂密码</button><button id="copy" type="button">复制新密码</button><button type="submit">更换并撤销旧密钥</button></form></details><button id="logout" type="button">退出登录</button>
+</section></main></body></html>

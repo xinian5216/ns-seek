@@ -1,0 +1,23 @@
+# TLS uses HTTP-01 on port 80, leaving the existing Reality service on 443 intact.
+{
+    log default {
+        exclude http.log.error
+    }
+    admin off
+    auto_https disable_redirects
+    servers {
+        protocols h1 h2
+    }
+}
+https://ns.042804.xyz:8443 {
+    tls {
+        issuer acme {
+            disable_tlsalpn_challenge
+        }
+    }
+    @control path /local/open /local/stop /local/session
+    respond @control 404
+    reverse_proxy 127.0.0.1:18765 {
+        header_up Host 127.0.0.1:18765
+    }
+}

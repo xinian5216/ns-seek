@@ -1,0 +1,28 @@
+[Unit]
+Description=NS Seek private ban archive
+After=network.target
+
+[Service]
+Type=simple
+User=ns-seek
+Group=ns-seek
+WorkingDirectory=/opt/ns-seek/app
+Environment=NS_SEEK_STATE_DIR=/var/lib/ns-seek
+Environment=NS_SEEK_PUBLIC_ORIGIN=https://ns.042804.xyz:8443
+ExecStart=/opt/ns-seek/runtime/node-v22.23.2-linux-x64/bin/node --no-warnings --max-old-space-size=96 backend/server.cjs
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ns-seek
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+MemoryMax=192M
+TasksMax=32
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

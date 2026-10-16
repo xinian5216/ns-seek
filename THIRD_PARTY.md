@@ -12,6 +12,8 @@
 
 站内接口的字段、分页和操作格式参考 [Nodyssey 的实际实现](https://github.com/5151561/nodyssey/blob/7eccd05bc45093dbf2fe31671ebd32979a0c6aee/shared/src/commonMain/kotlin/io/github/nodyssey/data/RulingRepository.kt)，该实现说明依据站点自己的 ruling 脚本（2026-08-02）核对。此处仅参考接口契约，自行编写 JavaScript，没有引入客户端代码或运行站点脚本。每页 20 条、最多 100 页及普通登录账号可读的行为尚需在当前真实登录环境验证；不是论坛提供的稳定 API 承诺。
 
+1.2.0 的「采集、SQLite 归档、增量更新、独立查询」架构及 `/api/admin/ruling/id-N` 入口参考 [NodeSeek-Rulings-Search 的实现](https://github.com/Z1rconium/NodeSeek-Rulings-Search/blob/cef33a4226b353b68403a9bc1c845cd90e8f3f0e/scan.py)。该仓库未找到明确许可证，因此本项目仅参考可观察接口和架构思路，没有复制其代码、引入其依赖或执行其爬虫。采集仍使用浏览器自身登录，不采用其 Cookie 提交方式或网络指纹模拟机制。
+
 本仓库 LICENSE 保留 MIT 完整许可文本，并为新增修改标注维护者版权。该标注不主张上游原作的版权。
 
 `jsdom` 仅用于开发测试，不会打包到油猴脚本；其依赖许可随 npm 包提供。GitHub Actions 官方组件与 Gitleaks 仅用于 CI。

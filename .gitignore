@@ -10,3 +10,9 @@ coverage/
 *.har
 playwright-report/
 test-results/
+.private/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.pid
