@@ -1,0 +1,12 @@
+node_modules/
+work/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.har
+playwright-report/
+test-results/
