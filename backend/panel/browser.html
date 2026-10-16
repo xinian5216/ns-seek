@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VPS 专用浏览器</title><link rel="stylesheet" href="/browser.css"><script src="/browser.js" defer></script></head>
+<body><main><h1>VPS 专用浏览器</h1><p>这是 VPS 上的论坛浏览器。请在原网页正常登录或完成验证，无需导出电脑 Cookie。打开此页会暂停采集；完成后点击「验证并启用自动同步」。</p><details><summary>登录状态与隐私</summary><p>画面和键盘输入仅通过你的密码会话传输，不保存截图或输入日志。论坛登录状态保存在 VPS 私有目录。</p></details>
+<nav><button id="home" type="button">论坛首页／登录</button><button id="ruling" type="button">管理记录页</button><button id="enable" type="button">验证并启用自动同步</button><button id="fit" type="button">切换原始大小</button><a href="/">返回面板</a></nav>
+<p id="connection" role="status">正在等待画面…</p><p id="message" role="status">正在连接专用浏览器…</p><div id="screen-wrap"><img id="screen" tabindex="0" alt="VPS 论坛浏览器画面；点击后可用键盘输入"></div>
+<p>点击画面中的输入框后直接输入，Tab 切换输入框，Enter 提交，滚轮上下滚动。中文或粘贴内容也可通过下方输入框发送。</p>
+<form id="paste"><label>发送到远程当前输入框<input id="text" type="password" autocomplete="off" maxlength="4096" placeholder="输入后点击发送；内容会立即清空"></label><button type="submit">发送文本</button></form>
+</main></body></html>

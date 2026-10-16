@@ -18,3 +18,16 @@ Fixed public origin: `https://ns.042804.xyz:8443`. Backend listens only on `127.
 `/local/open`, `/local/stop`, `/local/session` are local control routes and are blocked by Caddy on the public endpoint. All unknown paths fail closed. Static assets are an explicit three-file allowlist, never a filesystem directory server.
 
 Password hashes and keys persist privately; browser sessions/codes do not survive restart. Hourly cleanup physically removes expired rows with secure_delete and WAL truncation; requests filter expiry immediately. Database/provider snapshots are not encrypted or managed by this application.
+
+## Owner-only VPS browser and scheduler (1.3.0)
+
+`NS_SEEK_BROWSER=1` enables the dedicated browser. No query, sync or admin Bearer token grants the following routes; a current same-origin panel session is required. The browser never reads desktop cookies or exposes arbitrary CDP/evaluation commands.
+
+- `GET /browser`, `/browser.js`, `/browser.css`: authenticated UI. Unauthenticated `/browser` redirects to login.
+- `GET /owner/browser/frame`: transient PNG screenshot, no-store; owner session rechecked after capture.
+- `POST /owner/browser/action`: fixed navigate(home/ruling), click coordinates, wheel, text up to 4096 characters, or allowlisted keys. Only while automation is paused. No arbitrary URLs or evaluation. Input is transient, never logged.
+- `POST /owner/automation/enable {}`: validate/collect via normal forum browser; enable persisted schedule.
+- `POST /owner/automation/pause {}`: abort further ingestion and pause schedule.
+- `/local/status` includes owner scheduler state, current stage and next run; `/v1/status` includes only availability, enabled and fixed blocked category.
+
+Recent collection every six hours; historical batches up to 200 IDs, followed by a fifteen-minute continuation interval. Sequential >=1200ms after completed requests. Any login, challenge, rate, network, data or resource failure blocks subsequent scheduled requests until owner resume. Manual browser opening pauses automation. Application restart preserves schedule and block state; browser profile remains private.

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         NS 管理记录快捷查看 · 独立维护版
 // @namespace    https://github.com/xinian5216/ns-seek
-// @version      1.2.1
-// @description  登录浏览器同步记录到私人 SQLite，点击用户直接查私人档案，无第三方查询服务。
+// @version      1.3.0
+// @description  查询私人封禁档案，支持 VPS 自动采集和电脑手动补采，无第三方查询服务。
 // @match        https://www.nodeseek.com/post-*
 // @match        https://www.nodeseek.com/ruling*
 // @license      MIT
@@ -106,7 +106,7 @@
     header.append(title, close);
     const content = el('div');
     content.setAttribute('aria-live', 'polite');
-    const source = el('p', '来源：你的私人封禁档案（最近 365 天）。先同步后查询，档案不保证覆盖完整历史；同步时需保持本标签页打开。', 'notice');
+    const source = el('p', '来源：你的私人封禁档案（最近 365 天）。先同步后查询，档案不保证覆盖完整历史；电脑手动采集需保持标签页打开，VPS 自动采集无需电脑运行。', 'notice');
     dialog.append(header, source, content);
     root.append(style, dialog);
     document.body.append(host);
@@ -452,7 +452,7 @@
       const result = await backendRequest('/v1/status');
       if (current !== state) return;
       state.archive = validArchive(result.archive);
-      state.status = '一年内封禁记录会同步到私人数据库；论坛 Cookie 留在浏览器内。点击下方按钮后才开始读取论坛。';
+      state.status = result.automation?.enabled ? 'VPS 自动采集已启用，电脑无需保持运行。这里是备用的电脑手动采集，不必每次执行。' : '一年内封禁记录会同步到私人数据库；论坛 Cookie 留在浏览器内。点击下方按钮后才开始读取论坛。';
     } catch (error) { if (current === state) { state.status = error.message; if (/连接已过期/.test(error.message)) GM_deleteValue(STORAGE_KEY); } }
     if (current === state) render();
   }

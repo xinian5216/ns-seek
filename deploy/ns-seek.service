@@ -1,12 +1,13 @@
 [Unit]
 Description=NS Seek private ban archive
-After=network.target
+After=network.target ns-seek-browser.service
 
 [Service]
 Type=simple
 User=ns-seek
 Group=ns-seek
 WorkingDirectory=/opt/ns-seek/app
+Environment=NS_SEEK_BROWSER=1
 Environment=NS_SEEK_STATE_DIR=/var/lib/ns-seek
 Environment=NS_SEEK_PUBLIC_ORIGIN=https://ns.042804.xyz:8443
 ExecStart=/opt/ns-seek/runtime/node-v22.23.2-linux-x64/bin/node --no-warnings --max-old-space-size=96 backend/server.cjs

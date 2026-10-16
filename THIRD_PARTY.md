@@ -17,3 +17,5 @@
 本仓库 LICENSE 保留 MIT 完整许可文本，并为新增修改标注维护者版权。该标注不主张上游原作的版权。
 
 `jsdom` 仅用于开发测试，不会打包到油猴脚本；其依赖许可随 npm 包提供。GitHub Actions 官方组件与 Gitleaks 仅用于 CI。
+
+1.3.0 使用 Debian 官方 Chromium / chromium-sandbox / Xvfb 软件包，不将这些二进制打包或复制入本仓库。远程画面、输入与固定同源采集自行基于 [Chromium DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/) 实现，没有读取 Cookie、变更 User-Agent、关闭沙箱或绕过浏览器验证。

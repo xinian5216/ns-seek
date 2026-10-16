@@ -250,3 +250,37 @@ test('sync progress is authenticated, numeric only, ephemeral and marked stale a
   assert.equal((await s.request('/v1/progress', 'sync', {state:'completed',stage:'recent'})).status, 200);
   assert.equal((await s.request('/v1/status','query')).value.sync.stale, false);
 });
+
+test('dedicated browser screen and control require owner session, never query or sync keys',async t=>{
+ const actions=[];let enabled=false;
+ const browser={frame:async()=>Buffer.from([137,80,78,71]),action:async value=>actions.push(value)};
+ const automation={status:()=>({available:true,enabled}),enable:()=>{enabled=true;return{enabled}},pause:()=>{enabled=false;return{enabled}}};
+ const s=await setup(t,{browser,automation});
+ assert.equal((await fetch(s.origin+'/browser',{redirect:'manual'})).status,303);
+ for(const role of ['query','sync','admin']){
+  assert.equal((await s.request('/owner/browser/frame',role)).status,403);
+  assert.equal((await s.request('/owner/browser/action',role,{type:'text',text:'synthetic'})).status,403);
+  assert.equal((await s.request('/owner/automation/enable',role,{})).status,403);
+ }
+ const cookie=await s.session();const headers={Cookie:cookie,Origin:s.origin};
+ assert.equal((await fetch(s.origin+'/browser',{headers})).status,200);
+ assert.equal((await s.request('/owner/browser/action',null,{type:'evaluate',expression:'unsafe'},headers)).status,400);
+ assert.equal((await s.request('/owner/browser/action',null,{type:'text',text:'synthetic'},headers)).status,200);
+ assert.deepEqual(actions,[{type:'text',text:'synthetic'}]);
+ assert.equal((await s.request('/owner/automation/enable',null,{},headers)).status,200);
+ assert.equal((await s.request('/owner/browser/action',null,{type:'text',text:'synthetic'},headers)).status,409);
+ const frame=await fetch(s.origin+'/owner/browser/frame',{headers});assert.equal(frame.headers.get('content-type'),'image/png');assert.equal(frame.headers.get('cache-control'),'no-store');await frame.arrayBuffer();
+ assert.equal((await s.request('/owner/automation/pause',null,{},headers)).status,200);
+ assert.equal((await s.request('/owner/browser/action',null,{type:'text',text:'synthetic'},{Cookie:cookie,Origin:'https://www.nodeseek.com'})).status,401);
+});
+
+test('password rotation revokes an owner screenshot that was still in flight',async t=>{
+ const {hashPassword}=require('../backend/password.cjs');const first=token()+'!Aa1';const second=token()+'!Aa2';
+ let resolve;const browser={frame:()=>new Promise(r=>{resolve=r}),action:async()=>{}};
+ const automation={status:()=>({enabled:false}),pause:()=>({enabled:false}),enable:()=>({enabled:true})};
+ const s=await setup(t,{passwordHash:hashPassword(first),browser,automation});const cookie=await s.session();
+ const frame=fetch(s.origin+'/owner/browser/frame',{headers:{Cookie:cookie}});
+ for(let n=0;n<100&&!resolve;n++)await new Promise(r=>setTimeout(r,5));assert.ok(resolve);
+ assert.equal((await s.request('/auth/password',null,{currentPassword:first,newPassword:second},{Cookie:cookie})).status,200);
+ resolve(Buffer.from([137,80,78,71]));const response=await frame;assert.equal(response.status,401);assert.equal(response.headers.get('content-type'),'application/json; charset=utf-8');await response.json();
+});

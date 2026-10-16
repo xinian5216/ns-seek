@@ -10,7 +10,7 @@ const random = () => crypto.randomBytes(32).toString('base64url');
 const equal = (a, b) => typeof a === 'string' && /^[A-Za-z0-9_-]{43}$/.test(a) && typeof b === 'string' && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 function createApp({ store, queryToken = random(), syncToken = random(), adminToken = random(), passwordHash = null,
-  publicOrigin = null, persist = () => {}, now = Date.now } = {}) {
+  publicOrigin = null, persist = () => {}, now = Date.now, browser = null, automation = null } = {}) {
   if (publicOrigin && !/^https:\/\/ns\.042804\.xyz(?::8443)?$/.test(publicOrigin)) throw new Error('Invalid public origin');
   const setupCodes = new Map();
   const pairCodes = new Map();
@@ -68,8 +68,8 @@ function createApp({ store, queryToken = random(), syncToken = random(), adminTo
       if (url.origin !== origin) { reply(res, 403, { ok: false, error: 'origin_denied' }); return; }
       const token = (req.headers.authorization || '').replace(/^Bearer /, '');
       const cookie = (req.headers.cookie || '').match(/(?:^|;\s*)ns_seek_session=([A-Za-z0-9_-]+)/)?.[1];
-      const session = sessions.get(cookie);
-      const local = !!session && session.expires > now() && (!req.headers.origin || [origin, publicOrigin].includes(req.headers.origin));
+      const ownerValid = () => { const session = sessions.get(cookie); return !!session && session.expires > now() && (!req.headers.origin || [origin, publicOrigin].includes(req.headers.origin)); };
+      const local = ownerValid();
       const scope = equal(token, adminToken) ? 'admin' : equal(token, syncToken) ? 'sync' : equal(token, queryToken) ? 'query' : local ? 'local' : 'none';
       if (['sync', 'query'].includes(scope)) paired = true;
       const minute = Math.floor(now() / 60000);
@@ -107,7 +107,45 @@ function createApp({ store, queryToken = random(), syncToken = random(), adminTo
         paired = true;
         reply(res, 200, { ok: true, queryToken, syncToken }); return;
       }
-      if (scope === 'none') { reply(res, 401, { ok: false, error: 'unauthorized' }); return; }
+      if (scope === 'none') {
+        if (req.method === 'GET' && url.pathname === '/browser' && !url.search) { res.writeHead(303,{'Location':'/','Cache-Control':'no-store'}); res.end(); return; }
+        reply(res, 401, { ok: false, error: 'unauthorized' }); return;
+      }
+      if (['/browser','/browser.js','/browser.css'].includes(url.pathname) && req.method === 'GET' && !url.search) {
+        if (!local) { reply(res,403,{ok:false,error:'owner_session_required'}); return; }
+        const file = {'/browser':'browser.html','/browser.js':'browser.js','/browser.css':'browser.css'}[url.pathname];
+        const type = {'.html':'text/html','.js':'application/javascript','.css':'text/css'}[path.extname(file)];
+        res.writeHead(200,{'Content-Type':`${type}; charset=utf-8`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer',
+          'Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"});
+        res.end(fs.readFileSync(path.join(__dirname,'panel',file))); return;
+      }
+      if (url.pathname.startsWith('/owner/')) {
+        if (!local) { reply(res,403,{ok:false,error:'owner_session_required'}); return; }
+        if (!browser || !automation) { reply(res,503,{ok:false,error:'browser_unavailable'}); return; }
+        if (url.search) throw new Error('invalid_body');
+        if (req.method === 'POST' && url.pathname === '/owner/automation/pause') {
+          await body(req); if (!ownerValid()) { reply(res,401,{ok:false,error:'unauthorized'}); return; }
+          reply(res,200,{ok:true,automation:automation.pause()}); return;
+        }
+        if (req.method === 'POST' && url.pathname === '/owner/automation/enable') {
+          await body(req); if (!ownerValid()) { reply(res,401,{ok:false,error:'unauthorized'}); return; }
+          reply(res,200,{ok:true,automation:automation.enable()}); return;
+        }
+        if (req.method === 'GET' && url.pathname === '/owner/browser/frame') {
+          const frame = await browser.frame();
+          if (!ownerValid()) { reply(res,401,{ok:false,error:'unauthorized'}); return; }
+          res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(frame); return;
+        }
+        if (req.method === 'POST' && url.pathname === '/owner/browser/action') {
+          if (automation.status().enabled) { reply(res,409,{ok:false,error:'pause_automation_first'}); return; }
+          const {validateAction} = require('./browser.cjs');
+          const value = validateAction(await body(req));
+          if (!ownerValid()) { reply(res,401,{ok:false,error:'unauthorized'}); return; }
+          await browser.action(value);
+          reply(res,200,{ok:true}); return;
+        }
+        reply(res,404,{ok:false,error:'route_denied'}); return;
+      }
       if (req.method === 'POST' && url.pathname === '/auth/password' && local && !url.search) {
         const value = await body(req);
         if (passwordHash && !verifyPassword(value.currentPassword, passwordHash)) { reply(res, 401, { ok: false, error: 'current_password_failed' }); return; }
@@ -133,14 +171,14 @@ function createApp({ store, queryToken = random(), syncToken = random(), adminTo
         setImmediate(() => server.close()); return;
       }
       if (req.method === 'GET' && url.pathname === '/local/status' && local && !url.search) {
-        reply(res, 200, { ok: true, paired, sync: syncStatus(), archive: store.status() }); return;
+        reply(res, 200, { ok: true, paired, sync: syncStatus(), archive: store.status(), automation: automation?.status() || {available:false} }); return;
       }
       if (req.method === 'POST' && url.pathname === '/local/pair' && local) {
         await body(req);
         reply(res, 200, { ok: true, code: issue(pairCodes, 5 * 60 * 1000) }); return;
       }
       if (req.method === 'GET' && url.pathname === '/v1/status' && ['query', 'sync'].includes(scope) && !url.search) {
-        reply(res, 200, { ok: true, sync: syncStatus(), archive: store.status() }); return;
+        reply(res, 200, { ok: true, sync: syncStatus(), archive: store.status(), automation: automation ? {available:true,enabled:automation.status().enabled,blocked:automation.status().blocked} : {available:false} }); return;
       }
       if (req.method === 'POST' && url.pathname === '/v1/progress' && scope === 'sync' && !url.search) {
         const value = await body(req);
@@ -168,8 +206,9 @@ function createApp({ store, queryToken = random(), syncToken = random(), adminTo
       }
       reply(res, 403, { ok: false, error: 'route_or_scope_denied' });
     } catch (error) {
-      if (!res.headersSent) reply(res, ['invalid_record', 'conflicting_record', 'invalid_body', 'weak_password'].includes(error.message) || error instanceof SyntaxError ? 400 : 500,
-        { ok: false, error: ['invalid_record', 'conflicting_record', 'invalid_body', 'weak_password'].includes(error.message) ? error.message : 'request_failed' });
+      const known = ['invalid_record','conflicting_record','invalid_body','weak_password','browser_unavailable','rate_limited'];
+      const status = error.message === 'browser_unavailable' ? 503 : error.message === 'rate_limited' ? 429 : known.includes(error.message) || error instanceof SyntaxError ? 400 : 500;
+      if (!res.headersSent) reply(res,status,{ok:false,error:known.includes(error.message) ? error.message : 'request_failed'});
       else res.end();
     }
   });
@@ -189,15 +228,25 @@ if (require.main === module) {
   const publicOrigin = process.env.NS_SEEK_PUBLIC_ORIGIN || secrets.publicOrigin || null;
   if (publicOrigin && !secrets.passwordHash) throw new Error('Public service requires an initialized password');
   const store = openStore(path.join(stateDir, 'archive.sqlite'));
+  let browser = null; let automation = null;
+  if (process.env.NS_SEEK_BROWSER === '1') {
+    browser = require('./browser.cjs').createBrowser();
+    const resources = () => {
+      if (process.platform !== 'linux') return true;
+      const available = Number(fs.readFileSync('/proc/meminfo','utf8').match(/^MemAvailable:\s+(\d+)/m)?.[1]);
+      return Number.isFinite(available) && available >= 96 * 1024;
+    };
+    automation = require('./automation.cjs').createAutomation({store,browser,stateDir,resources});
+  }
   const persist = (value) => {
     const temporary = secretsFile + '.tmp';
     fs.writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 });
     fs.renameSync(temporary, secretsFile);
   };
-  const app = createApp({ store, ...secrets, publicOrigin, persist });
+  const app = createApp({ store, ...secrets, publicOrigin, persist, browser, automation });
   const maintenance = setInterval(() => store.purge(), 60 * 60 * 1000);
   maintenance.unref();
-  app.server.once('close', () => { clearInterval(maintenance); store.close(); });
+  app.server.once('close', async () => { clearInterval(maintenance); await automation?.close(); browser?.close(); store.close(); });
   app.server.on('error', () => { console.error('Local service could not start; check port 18765.'); store.close(); process.exitCode = 1; });
   app.server.listen(18765, '127.0.0.1', () => {
     fs.writeFileSync(path.join(stateDir, 'connect-url.txt'), `${publicOrigin || 'http://127.0.0.1:18765'}/#setup=${app.setupCode()}`, { mode: 0o600 });

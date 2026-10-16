@@ -5,6 +5,7 @@
   let refreshing = false;
   let poll;
   let clearCode;
+  let manualConfigured = false;
   const request = async (url, data) => {
     const response = await fetch(url, { method: data === undefined ? 'GET' : 'POST', credentials: 'same-origin',
       headers: data === undefined ? {} : { 'Content-Type': 'application/json' }, body: data === undefined ? undefined : JSON.stringify(data), signal: AbortSignal.timeout(10000) });
@@ -25,6 +26,17 @@
     el('count').textContent = String(data.archive.count);
     el('last').textContent = data.archive.lastSync ? new Date(data.archive.lastSync).toLocaleString() : '尚未同步';
     el('login').hidden = true; el('controls').hidden = false;
+    const auto = data.automation;
+    el('automation').hidden = !auto?.available;
+    if (!manualConfigured) { el('manual').open = !auto?.available; manualConfigured = true; }
+    if (auto?.available) {
+      const reasons = {verification_required:'需要你完成论坛验证，采集已暂停',login_required:'论坛登录失效，采集已暂停',login_or_verification_required:'需要论坛登录或浏览器验证，采集已暂停',rate_limited:'论坛限速，采集已暂停',network_error:'网络异常，采集已暂停',browser_unavailable:'专用浏览器暂不可用，采集已暂停',resource_limit:'VPS 可用内存不足，采集已暂停',format_error:'接口格式发生变化，采集已暂停',forum_error:'论坛服务异常，采集已暂停'};
+      el('auto-state').textContent = auto.blocked ? reasons[auto.blocked] || '采集已暂停，请检查浏览器' : auto.running ? 'VPS 正在自动采集，电脑可以关闭' : auto.enabled ? '已启用，等待下次自动采集' : '自动采集尚未启用／已手动暂停';
+      const phase = auto.stage === 'recent' ? `正在读取第 ${auto.page} 页。` : auto.stage === 'history' ? `正在补采编号 ${auto.recordId}。` : auto.stage === 'verify' ? '正在验证历史读取入口。' : '';
+      const date = value => value ? new Date(value).toLocaleString() : '尚无';
+      el('auto-detail').textContent = `${phase}最近成功采集：${date(auto.lastSuccessAt)}。${auto.nextRunAt !== null ? `下次计划：${date(auto.nextRunAt)}。` : ''}${auto.resumeAfter ? `最早可手动恢复：${date(auto.resumeAfter)}。` : ''}${auto.blocked ? '请打开 VPS 浏览器处理，再点击验证并启用。' : ''}`;
+      el('auto-count').textContent = `已检查 ${data.archive.checkedIds ?? 0} 个记录编号，保留 ${data.archive.count} 条一年内封禁／解封。`;
+    }
     const sync = data.sync || { state: 'idle', paired: data.paired };
     const states = { idle: sync.paired ? '已配对，尚未开始同步' : '等待油猴配对，尚未开始同步', running: '正在同步', stopped: '已手动停止，可在论坛继续', completed: '本次同步已完成', error: '同步遇到错误，已停止' };
     el('sync-state').textContent = sync.stale ? '暂未收到脚本回应，不能确认仍在运行' : states[sync.state] || '等待同步';
@@ -45,6 +57,14 @@
     catch (e) { message.textContent = e.message; }
   };
   el('refresh').onclick = () => refresh(true).catch(refreshError);
+  for (const [id,route] of [['auto-enable','enable'],['auto-pause','pause']]) {
+    el(id).onclick = async () => {
+      el(id).disabled = true;
+      try { await request(`/owner/automation/${route}`,{}); await refresh(); message.textContent = route === 'enable' ? '已提交自动采集检查，运行状态会持续更新。电脑无需保持开机。' : '自动采集已暂停，已存档记录保留。'; }
+      catch (error) { message.textContent = error.message; }
+      finally { el(id).disabled = false; }
+    };
+  }
   el('pair').onclick = async () => {
     el('pair').disabled = true; message.textContent = '正在生成连接码，随后将在当前标签页前往论坛…';
     try {
@@ -89,6 +109,6 @@
     const code = new URLSearchParams(location.hash.slice(1)).get('setup');
     history.replaceState(null, '', '/');
     if (code) await request('/local/session', { code });
-    await refresh(); schedule(); message.textContent = '服务已连接。连接油猴本身不会开始采集，请查看下方同步状态。';
+    await refresh(); schedule(); message.textContent = '服务已连接。请查看下方采集状态；VPS 自动采集启用后无需保持电脑运行。';
   } catch { showLogin(); message.textContent = '请输入专属访问密码。'; }
 })();

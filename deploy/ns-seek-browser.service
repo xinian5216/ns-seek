@@ -1,0 +1,27 @@
+[Unit]
+Description=NS Seek dedicated private forum browser
+After=network.target
+
+[Service]
+Type=simple
+User=ns-seek-browser
+Group=ns-seek-browser
+Environment=HOME=/var/lib/ns-seek-browser
+ExecStart=/bin/sh /opt/ns-seek/app/deploy/start-browser.sh
+Restart=on-failure
+RestartSec=10
+UMask=0077
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ns-seek-browser
+MemoryHigh=infinity
+MemoryMax=512M
+MemorySwapMax=512M
+TasksMax=160
+Nice=10
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=multi-user.target

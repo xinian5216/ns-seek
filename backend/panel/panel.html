@@ -1,14 +1,16 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>我的封禁档案</title><link rel="stylesheet" href="/panel.css"><script src="/panel.js" defer></script></head>
-<body><main><p class="eyebrow">NS SEEK · 私人档案</p><h1>我的封禁档案</h1><p>只保留最近 365 天的封禁与解封记录，到期自动清理。论坛 Cookie 始终留在你的浏览器中。</p>
+<body><main><p class="eyebrow">NS SEEK · 私人档案</p><h1>我的封禁档案</h1><p>只保留最近 365 天的封禁与解封记录，到期自动清理。电脑 Cookie 不会导出；VPS 自动采集使用专用浏览器的私有登录状态。</p>
 <p id="message" role="status">正在连接…</p>
 <form id="login" hidden><label>访问密码<input id="password" type="password" autocomplete="current-password" required maxlength="128"></label><button type="submit">登录</button></form>
 <section id="controls" hidden><div class="stats"><div><strong id="count">0</strong><span>一年内已存档记录</span></div><div><strong id="last">—</strong><span>最近同步</span></div></div>
-<section class="sync-status" aria-live="polite"><h2>同步状态</h2><p id="sync-state">正在检查…</p><p id="sync-detail"></p><p id="sync-count"></p><p id="refreshed" class="note"></p></section>
+<section id="automation" class="sync-status" aria-live="polite" hidden><h2>VPS 自动采集</h2><p id="auto-state"></p><p id="auto-detail"></p><p id="auto-count"></p><a href="/browser">打开 VPS 浏览器：登录／验证</a><div><button id="auto-enable" type="button">验证并启用自动同步</button><button id="auto-pause" type="button">暂停自动同步</button></div><p class="note">默认每 6 小时检查新增记录，历史按小批次持续补采。启用后可关闭电脑；遇到登录失效、验证、限速或网络错误会暂停并显示原因。</p></section>
+<details id="manual"><summary>电脑采集（备用）</summary><section class="sync-status" aria-live="polite"><h2>同步状态</h2><p id="sync-state">正在检查…</p><p id="sync-detail"></p><p id="sync-count"></p><p id="refreshed" class="note"></p></section>
 <button id="pair" type="button">连接油猴并前往论坛</button><button id="copy-pair" type="button">复制一次性连接码</button><button id="refresh" type="button">刷新档案状态</button>
 <label id="pair-fallback" hidden>一次性连接码（5 分钟有效）<input id="pair-code" readonly autocomplete="off"></label>
 <p>配对后，仍需在论坛的「私人档案同步」弹窗点击「同步档案」才会开始。此面板每 5 秒更新状态。采集时请保留论坛标签页；查看此面板请在另一个标签页手动打开本地址。</p>
 <ol><li><a href="https://raw.githubusercontent.com/xinian5216/ns-seek/main/ns-seek.user.js" target="_blank" rel="noopener noreferrer">安装或更新油猴脚本</a>，允许访问档案服务。</li><li>先在同一个浏览器中登录 NodeSeek，再点击上方连接按钮，将在当前标签页前往论坛。</li><li>若未自动配对，可复制一次性连接码，粘贴到论坛脚本弹窗。连接成功后选择「同步档案」，先同步最近记录，再向前补采一年内记录。同步窗口需保持打开。</li><li>回到帖子点击用户的「管理记录」，直接查询私人档案。</li></ol>
 <p class="note">首次补采可能耗时较长，可停止后续传。只覆盖论坛允许读取且已同步的记录；遇到登录失效或限速会停止。</p>
+</details>
 <details><summary>更换密码并撤销旧连接</summary><p>新密码需 24–128 位，含大小写字母、数字和符号。更换后所有旧登录和油猴密钥立即失效，请重新连接油猴。</p><form id="rotate"><label>当前密码<input id="current-password" type="password" autocomplete="current-password" maxlength="128" required></label><label>新密码<input id="new-password" type="password" autocomplete="new-password" minlength="24" maxlength="128" required></label><button id="generate" type="button">生成复杂密码</button><button id="copy" type="button">复制新密码</button><button type="submit">更换并撤销旧密钥</button></form></details><button id="logout" type="button">退出登录</button>
 </section></main></body></html>
